@@ -1,128 +1,82 @@
-// ============================================================
-//  HUDScene.js – Heads-Up-Display
-//  Zeigt: Schadensprozent, Stocks, Spielernamen
-//  Läuft parallel zur GameScene
-// ============================================================
+# 🏈 Football League of Legends – Prototyp v0.1
 
-export class HUDScene extends Phaser.Scene {
-  constructor() {
-    super({ key: 'HUDScene' });
-  }
+Ein 2D-Platform-Fighter im Stil von Super Smash Bros, als Browser-Spiel.
 
-  init(data) {
-    this.fighters = data.fighters || [];
-  }
+---
 
-  create() {
-    const W = this.scale.width;
-    const H = this.scale.height;
+## 🚀 Schnellstart
 
-    // Semi-transparenter HUD-Balken unten
-    const hudBg = this.add.graphics();
-    hudBg.fillStyle(0x000000, 0.65);
-    hudBg.fillRect(0, H - 130, W, 130);
-    hudBg.lineStyle(1, 0x4488aa, 0.5);
-    hudBg.lineBetween(0, H - 130, W, H - 130);
+Da das Spiel ES6-Module verwendet, braucht es einen lokalen Webserver.
 
-    // Mittel-Divider
-    hudBg.lineStyle(1, 0x334455, 0.8);
-    hudBg.lineBetween(W / 2, H - 130, W / 2, H);
+### Option A – VS Code (empfohlen für Anfänger)
+1. VS Code öffnen
+2. Extension **"Live Server"** installieren (Ritwick Dey)
+3. `index.html` öffnen → Rechtsklick → **"Open with Live Server"**
+4. Browser öffnet sich automatisch ✅
 
-    // Stocks-Anzeige und % für jeden Spieler
-    this.hudElements = this.fighters.map((fighter, i) => {
-      const side = i === 0 ? 'left' : 'right';
-      const cx   = i === 0 ? W * 0.25 : W * 0.75;
-      const cy   = H - 65;
+### Option B – Node.js (falls installiert)
+```bash
+npx serve .
+# oder
+npx http-server .
+```
+Dann `http://localhost:3000` im Browser öffnen.
 
-      // Spieler-Farbe als Balken oben
-      const colorBar = this.add.graphics();
-      colorBar.fillStyle(fighter.color, 0.8);
-      colorBar.fillRect(i === 0 ? 0 : W / 2, H - 130, W / 2, 4);
+### Option C – Python (falls installiert)
+```bash
+python -m http.server 8080
+```
+Dann `http://localhost:8080` öffnen.
 
-      // Name
-      const nameText = this.add.text(cx, cy - 28, fighter.name, {
-        fontSize: '20px',
-        fontFamily: 'Arial Black',
-        color: '#ffffff',
-        stroke: '#000000',
-        strokeThickness: 4,
-      }).setOrigin(0.5);
+> ⚠️ Doppelklick auf `index.html` funktioniert NICHT (CORS-Fehler wegen ES6-Modulen)
 
-      // Schadensprozentwert – groß
-      const dmgText = this.add.text(cx, cy + 2, '0%', {
-        fontSize: '42px',
-        fontFamily: 'Arial Black',
-        color: '#00ff88',
-        stroke: '#000000',
-        strokeThickness: 5,
-      }).setOrigin(0.5);
+---
 
-      // Stocks als Symbole (kleine Kreise)
-      const stockIcons = [];
-      for (let s = 0; s < 4; s++) {
-        const sx = cx - 30 + s * 22;
-        const sy = cy + 46;
-        const icon = this.add.circle(sx, sy, 8, fighter.color, 1);
-        icon.setStrokeStyle(2, 0xffffff, 0.6);
-        stockIcons.push(icon);
-      }
+## 🎮 Steuerung
 
-      return { dmgText, stockIcons, nameText, fighter };
-    });
+| Aktion        | Spieler 1 | Spieler 2     |
+|---------------|-----------|---------------|
+| Bewegen       | A / D     | ← / →         |
+| Springen      | W         | ↑             |
+| Fast Fall     | S (in Luft) | ↓ (in Luft) |
+| Angriff       | F         | L             |
 
-    // Titel oben mittig
-    this.add.text(W / 2, 18, 'FOOTBALL LEAGUE OF LEGENDS', {
-      fontSize: '16px',
-      fontFamily: 'Arial Black',
-      color: '#ffcc00',
-      stroke: '#000000',
-      strokeThickness: 3,
-      alpha: 0.9
-    }).setOrigin(0.5);
+---
 
-    // Timer-Platzhalter
-    this.timerText = this.add.text(W / 2, 50, 'FREE FOR ALL', {
-      fontSize: '13px',
-      fontFamily: 'Arial',
-      color: '#aaaaaa',
-    }).setOrigin(0.5);
+## 📁 Projektstruktur
 
-    // Steuerungshinweis (verschwindet nach 4 Sekunden)
-    const hint = this.add.text(W / 2, H - 145, 'P1: WASD + F  |  P2: Pfeiltasten + L', {
-      fontSize: '12px', fontFamily: 'Arial', color: '#888888'
-    }).setOrigin(0.5);
-    this.tweens.add({
-      targets: hint,
-      alpha: 0,
-      delay: 3500,
-      duration: 800
-    });
-  }
+```
+football-legend/
+├── index.html              # Einstiegspunkt
+├── src/
+│   ├── main.js             # Phaser-Konfiguration
+│   ├── characters/
+│   │   └── Fighter.js      # Basis-Klasse für alle Charaktere
+│   └── scenes/
+│       ├── MenuScene.js    # Hauptmenü & Siegerbildschirm
+│       ├── GameScene.js    # Spielfeld & Spiellogik
+│       └── HUDScene.js     # HUD (Schaden, Leben, Stocks)
+└── assets/                 # Bilder, Sounds (noch leer)
+```
 
-  update() {
-    if (!this.hudElements) return;
+---
 
-    this.hudElements.forEach(({ dmgText, stockIcons, fighter }) => {
-      // Schadensprozentwert aktualisieren
-      const pct = Math.floor(fighter.damage);
-      dmgText.setText(`${pct}%`);
+## 🔧 Nächste Schritte (Phase 1 → 2)
 
-      // Farbe: grün → gelb → orange → rot
-      if (pct < 50)       dmgText.setColor('#00ff88');
-      else if (pct < 100) dmgText.setColor('#ffdd00');
-      else if (pct < 150) dmgText.setColor('#ff8800');
-      else                dmgText.setColor('#ff2244');
+- [ ] Sprite-Grafiken statt Rechtecke
+- [ ] Verschiedene Angriffe (Neutral, Smash, Special)
+- [ ] 4-Spieler-Unterstützung
+- [ ] Durchfallplattformen
+- [ ] Sound-Effekte
+- [ ] Zweiter Charakter mit anderem Moveset
+- [ ] Gamepad-Unterstützung (Browser Gamepad API)
 
-      // Stocks aktualisieren: ausgefüllte = verbleibend, leere = verloren
-      stockIcons.forEach((icon, s) => {
-        if (s < fighter.stocks) {
-          icon.setFillStyle(fighter.color, 1);
-          icon.setScale(1);
-        } else {
-          icon.setFillStyle(0x222222, 1);
-          icon.setScale(0.7);
-        }
-      });
-    });
-  }
-}
+---
+
+## 💡 Debug-Tipps
+
+In `src/main.js` → `arcade: { debug: true }` aktivieren, um Hitboxen zu sehen.
+
+---
+
+*Prototyp erstellt: Mai 2025 | Engine: Phaser 3.60*
