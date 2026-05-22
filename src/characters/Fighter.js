@@ -37,9 +37,11 @@ export class Fighter {
     };
 
     // --- Phaser-Sprite (einfaches Rechteck als Placeholder) ---
-    this.sprite = scene.physics.add.rectangle(x, y, 48, 64, this.color);
-    this.sprite.setMaxVelocity(800, 1800);
-    this.sprite.setDragX(1200);
+    this.sprite = scene.add.rectangle(x, y, 48, 64, this.color);
+    scene.physics.add.existing(this.sprite);          // Physik draufsetzen
+    this.sprite.body.setMaxVelocity(800, 1800);
+    this.sprite.body.setDragX(1200);
+    this.sprite.body.setCollideWorldBounds(false);    // Blast Zone statt Wand
     this.sprite.owner = this;
 
     // Nummern-Label
