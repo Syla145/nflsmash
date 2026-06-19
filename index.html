@@ -1,151 +1,504 @@
-// ============================================================
-//  MenuScene.js – Hauptmenü & Siegerbildschirm
-// ============================================================
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Football League of Legends</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0f;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    canvas { display: block; border: 2px solid #222; }
+  </style>
+</head>
+<body>
+<div id="game-container"></div>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script>
 
-export class MenuScene extends Phaser.Scene {
-  constructor() {
-    super({ key: 'MenuScene' });
+// ============================================================
+//  Fighter – Basis-Klasse
+// ============================================================
+class Fighter {
+  constructor(scene, x, y, playerIndex, config = {}) {
+    this.scene = scene;
+    this.playerIndex = playerIndex;
+
+    this.stats = {
+      walkSpeed:     220,
+      runSpeed:      360,
+      jumpPower:    -750,
+      airSpeed:      200,
+      fallSpeed:     900,
+      fastFallSpeed: 1400,
+      weight:        100,
+      jumpCount:     2,
+      ...config.stats
+    };
+
+    this.name       = config.name  || `P${playerIndex + 1}`;
+    this.color      = config.color || (playerIndex === 0 ? 0x00ddff : 0xff4466);
+    this.stocks     = 4;
+    this.damage     = 0;
+    this.jumpsLeft  = this.stats.jumpCount;
+
+    this.state = {
+      attacking:   false,
+      hitstun:     0,
+      fastFalling: false,
+      facingRight: playerIndex === 0,
+    };
+
+    // Sprite: einfaches Rechteck + Physik
+    this.sprite = scene.add.rectangle(x, y, 48, 64, this.color);
+    scene.physics.add.existing(this.sprite);
+    this.sprite.body.setMaxVelocity(800, 1800);
+    this.sprite.body.setDragX(1200);
+    this.sprite.body.setCollideWorldBounds(false);
+    this.sprite.owner = this;
+
+    this.label = scene.add.text(x, y - 42, this.name, {
+      fontSize: '14px', fontFamily: 'Arial Black',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 3
+    }).setOrigin(0.5);
+
+    this.damageLabel = scene.add.text(x, y - 58, '0%', {
+      fontSize: '12px', fontFamily: 'Arial Black',
+      color: '#ffdd00', stroke: '#000000', strokeThickness: 3
+    }).setOrigin(0.5);
+
+    this.attackCooldown = 0;
   }
 
-  init(data) {
-    this.winner = data?.winner || null;
+  update(cursors, delta) {
+    const body     = this.sprite.body;
+    const onGround = body.blocked.down;
+
+    if (this.state.hitstun > 0) {
+      this.state.hitstun -= delta;
+      this._updateLabels();
+      return;
+    }
+
+    if (this.attackCooldown > 0) this.attackCooldown -= delta;
+
+    // Bewegung
+    if (cursors.left.isDown) {
+      body.setVelocityX(onGround ? -this.stats.runSpeed : -this.stats.airSpeed);
+      this.state.facingRight = false;
+    } else if (cursors.right.isDown) {
+      body.setVelocityX(onGround ? this.stats.runSpeed : this.stats.airSpeed);
+      this.state.facingRight = true;
+    }
+
+    // Sprung
+    if (Phaser.Input.Keyboard.JustDown(cursors.jump)) {
+      if (onGround) this.jumpsLeft = this.stats.jumpCount;
+      if (this.jumpsLeft > 0) {
+        body.setVelocityY(this.stats.jumpPower);
+        this.jumpsLeft--;
+        this.state.fastFalling = false;
+      }
+    }
+
+    // Fast Fall
+    if (!onGround && cursors.down.isDown && body.velocity.y > 0)
+      this.state.fastFalling = true;
+    body.setMaxVelocityY(this.state.fastFalling ? this.stats.fastFallSpeed : this.stats.fallSpeed);
+
+    if (onGround) {
+      this.jumpsLeft = this.stats.jumpCount;
+      this.state.fastFalling = false;
+    }
+
+    // Angriff
+    if (Phaser.Input.Keyboard.JustDown(cursors.attack) && this.attackCooldown <= 0)
+      this._doAttack(cursors.down.isDown, cursors.up.isDown);
+
+    this.sprite.setAlpha(this.state.facingRight ? 1.0 : 0.82);
+    this._updateLabels();
   }
+
+  _doAttack(down, up) {
+    this.state.attacking = true;
+    this.attackCooldown  = 400;
+
+    const dir = this.state.facingRight ? 1 : -1;
+    const ox  = this.sprite.x + dir * 50;
+    const oy  = up ? this.sprite.y - 40 : down ? this.sprite.y + 40 : this.sprite.y;
+
+    const hb = this.scene.add.rectangle(ox, oy, 60, 50, 0xffff00, 0.35);
+
+    this.scene.fighters.forEach(other => {
+      if (other === this) return;
+      const b1 = new Phaser.Geom.Rectangle(ox - 30, oy - 25, 60, 50);
+      const b2 = other.sprite.getBounds();
+      if (Phaser.Geom.Intersects.RectangleToRectangle(b1, b2))
+        other.receiveHit(12, dir, up ? -1 : 0);
+    });
+
+    this.scene.time.delayedCall(120, () => { hb.destroy(); this.state.attacking = false; });
+    this.sprite.setFillStyle(0xffffff);
+    this.scene.time.delayedCall(80, () => this.sprite.setFillStyle(this.color));
+  }
+
+  receiveHit(baseDamage, dirX, dirY = 0) {
+    this.damage += baseDamage;
+    const kb = ((this.damage * 0.1 + 0.1) * (baseDamage + 5) *
+                (200 / (this.stats.weight + 100)) * 1.4 + 4) * 18;
+
+    this.sprite.body.setVelocity(dirX * kb, dirY !== 0 ? dirY * kb * 0.8 : -kb * 0.6);
+    this.state.hitstun = Math.min(kb * 1.2, 600);
+
+    this.sprite.setFillStyle(0xff0000);
+    this.scene.time.delayedCall(150, () => this.sprite.setFillStyle(this.color));
+    this.scene.cameras.main.shake(80, 0.006);
+  }
+
+  loseStock() {
+    this.stocks--;
+    this.damage = 0;
+    this.scene.events.emit('stockLost', this.playerIndex, this.stocks);
+
+    if (this.stocks <= 0) {
+      this.scene.events.emit('playerOut', this.playerIndex);
+      this.sprite.setVisible(false);
+      this.label.setVisible(false);
+      this.damageLabel.setVisible(false);
+      return;
+    }
+
+    const spawnX = this.playerIndex === 0 ? 320 : 960;
+    this.sprite.setPosition(spawnX, 200);
+    this.sprite.body.setVelocity(0, 0);
+    this.state.hitstun = 0;
+    this.sprite.setAlpha(0.5);
+    this.scene.time.delayedCall(1500, () => this.sprite.setAlpha(1.0));
+  }
+
+  _updateLabels() {
+    this.label.setPosition(this.sprite.x, this.sprite.y - 42);
+    this.damageLabel.setPosition(this.sprite.x, this.sprite.y - 58);
+    this.damageLabel.setText(`${Math.floor(this.damage)}%`);
+    const p = Math.min(this.damage / 150, 1);
+    this.damageLabel.setColor(`rgb(${Math.floor(p*255)},${Math.floor((1-p)*200)},50)`);
+  }
+
+  isOutOfBounds(W, H) {
+    return this.sprite.x < -200 || this.sprite.x > W + 200 ||
+           this.sprite.y < -300 || this.sprite.y > H + 100;
+  }
+
+  destroy() {
+    this.sprite.destroy();
+    this.label.destroy();
+    this.damageLabel.destroy();
+  }
+}
+
+// ============================================================
+//  MenuScene
+// ============================================================
+class MenuScene extends Phaser.Scene {
+  constructor() { super({ key: 'MenuScene' }); }
+
+  init(data) { this.winner = data?.winner || null; }
 
   create() {
     const W = this.scale.width;
     const H = this.scale.height;
 
-    // Hintergrund
     const bg = this.add.graphics();
     bg.fillGradientStyle(0x050510, 0x050510, 0x0d1a2e, 0x0d1a2e, 1);
     bg.fillRect(0, 0, W, H);
 
-    // Partikel-Effekt (Sterne)
     for (let i = 0; i < 80; i++) {
-      const x = Phaser.Math.Between(0, W);
-      const y = Phaser.Math.Between(0, H);
-      const r = Phaser.Math.FloatBetween(0.5, 2.5);
-      const a = Phaser.Math.FloatBetween(0.2, 0.8);
-      this.add.circle(x, y, r, 0xffffff, a);
+      this.add.circle(
+        Phaser.Math.Between(0, W), Phaser.Math.Between(0, H),
+        Phaser.Math.FloatBetween(0.5, 2.5), 0xffffff,
+        Phaser.Math.FloatBetween(0.2, 0.8)
+      );
     }
 
-    // Football-Emoji als dekoratives Element
-    this.add.text(W / 2, H * 0.15, '🏈', {
-      fontSize: '64px'
+    this.add.text(W/2, H*0.15, '🏈', { fontSize: '64px' }).setOrigin(0.5);
+
+    this.add.text(W/2, H*0.30, 'FOOTBALL', {
+      fontSize: '72px', fontFamily: 'Arial Black',
+      color: '#ffcc00', stroke: '#aa6600', strokeThickness: 8
     }).setOrigin(0.5);
 
-    // Titel
-    this.add.text(W / 2, H * 0.30, 'FOOTBALL', {
-      fontSize: '72px',
-      fontFamily: 'Arial Black',
-      color: '#ffcc00',
-      stroke: '#aa6600',
-      strokeThickness: 8,
+    this.add.text(W/2, H*0.44, 'LEAGUE OF LEGENDS', {
+      fontSize: '32px', fontFamily: 'Arial Black',
+      color: '#ffffff', stroke: '#003366', strokeThickness: 5
     }).setOrigin(0.5);
 
-    this.add.text(W / 2, H * 0.44, 'LEAGUE OF LEGENDS', {
-      fontSize: '32px',
-      fontFamily: 'Arial Black',
-      color: '#ffffff',
-      stroke: '#003366',
-      strokeThickness: 5,
-    }).setOrigin(0.5);
-
-    // Sterne-Dekoration
-    this.add.text(W / 2, H * 0.53, '★  ★  ★  ★  ★', {
-      fontSize: '20px',
-      color: '#ffaa00',
+    this.add.text(W/2, H*0.53, '★  ★  ★  ★  ★', {
+      fontSize: '20px', color: '#ffaa00'
     }).setOrigin(0.5);
 
     if (this.winner) {
-      // --- Siegerbildschirm ---
       const isDraw = this.winner === 'Unentschieden';
-
-      this.add.text(W / 2, H * 0.63, isDraw ? '🤝 UNENTSCHIEDEN!' : `🏆 ${this.winner} GEWINNT!`, {
-        fontSize: '36px',
-        fontFamily: 'Arial Black',
+      this.add.text(W/2, H*0.63,
+        isDraw ? '🤝 UNENTSCHIEDEN!' : `🏆 ${this.winner} GEWINNT!`, {
+        fontSize: '36px', fontFamily: 'Arial Black',
         color: isDraw ? '#aaaaff' : '#ffdd00',
-        stroke: '#000000',
-        strokeThickness: 5,
+        stroke: '#000000', strokeThickness: 5
       }).setOrigin(0.5);
     }
 
-    // Start-Button
-    const btnY = this.winner ? H * 0.80 : H * 0.68;
+    const btnY = this.winner ? H*0.80 : H*0.68;
     const btnBg = this.add.graphics();
-    btnBg.fillStyle(0x1a5fa0, 1);
-    btnBg.fillRoundedRect(W / 2 - 160, btnY - 28, 320, 56, 12);
-    btnBg.lineStyle(2, 0x44aaff, 0.8);
-    btnBg.strokeRoundedRect(W / 2 - 160, btnY - 28, 320, 56, 12);
+    const drawBtn = (col, border) => {
+      btnBg.clear();
+      btnBg.fillStyle(col, 1);
+      btnBg.fillRoundedRect(W/2-160, btnY-28, 320, 56, 12);
+      btnBg.lineStyle(2, border, 0.9);
+      btnBg.strokeRoundedRect(W/2-160, btnY-28, 320, 56, 12);
+    };
+    drawBtn(0x1a5fa0, 0x44aaff);
 
-    const btnText = this.add.text(W / 2, btnY, this.winner ? '▶  NOCHMAL SPIELEN' : '▶  SPIEL STARTEN', {
-      fontSize: '22px',
-      fontFamily: 'Arial Black',
-      color: '#ffffff',
-      stroke: '#000000',
-      strokeThickness: 3,
+    this.add.text(W/2, btnY, this.winner ? '▶  NOCHMAL SPIELEN' : '▶  SPIEL STARTEN', {
+      fontSize: '22px', fontFamily: 'Arial Black',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 3
     }).setOrigin(0.5);
 
-    // Button interaktiv machen
-    const btnZone = this.add.zone(W / 2, btnY, 320, 56).setInteractive();
-    btnZone.on('pointerover', () => {
-      btnBg.clear();
-      btnBg.fillStyle(0x2a7fd0, 1);
-      btnBg.fillRoundedRect(W / 2 - 160, btnY - 28, 320, 56, 12);
-      btnBg.lineStyle(2, 0x88ccff, 1);
-      btnBg.strokeRoundedRect(W / 2 - 160, btnY - 28, 320, 56, 12);
-      this.input.setDefaultCursor('pointer');
-    });
-    btnZone.on('pointerout', () => {
-      btnBg.clear();
-      btnBg.fillStyle(0x1a5fa0, 1);
-      btnBg.fillRoundedRect(W / 2 - 160, btnY - 28, 320, 56, 12);
-      btnBg.lineStyle(2, 0x44aaff, 0.8);
-      btnBg.strokeRoundedRect(W / 2 - 160, btnY - 28, 320, 56, 12);
-      this.input.setDefaultCursor('default');
-    });
-    btnZone.on('pointerdown', () => this._startGame());
+    const zone = this.add.zone(W/2, btnY, 320, 56).setInteractive();
+    zone.on('pointerover',  () => { drawBtn(0x2a7fd0, 0x88ccff); this.input.setDefaultCursor('pointer'); });
+    zone.on('pointerout',   () => { drawBtn(0x1a5fa0, 0x44aaff); this.input.setDefaultCursor('default'); });
+    zone.on('pointerdown',  () => this.scene.start('GameScene'));
 
-    // Leertaste zum Starten
-    this.input.keyboard.once('keydown-SPACE', () => this._startGame());
-    this.input.keyboard.once('keydown-ENTER', () => this._startGame());
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('GameScene'));
 
-    // Steuerungsübersicht
-    this._drawControls(W, H);
-
-    // Pulsier-Animation auf "DRÜCKE LEERTASTE"
-    const pressText = this.add.text(W / 2, btnY + 55, 'oder LEERTASTE drücken', {
+    const press = this.add.text(W/2, btnY+55, 'oder LEERTASTE drücken', {
       fontSize: '14px', fontFamily: 'Arial', color: '#667788'
     }).setOrigin(0.5);
-    this.tweens.add({
-      targets: pressText, alpha: 0.2, duration: 900,
-      yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
-    });
+    this.tweens.add({ targets: press, alpha: 0.2, duration: 900, yoyo: true, repeat: -1 });
 
-    // Versionsnummer
-    this.add.text(W - 10, H - 10, 'v0.1 – Prototyp', {
-      fontSize: '11px', fontFamily: 'Arial', color: '#334455'
-    }).setOrigin(1, 1);
-  }
-
-  _drawControls(W, H) {
-    const y = H * 0.91;
-    this.add.text(W / 2, y, '🎮  STEUERUNG', {
+    // Steuerung
+    this.add.text(W/2, H*0.91, '🎮  STEUERUNG', {
       fontSize: '13px', fontFamily: 'Arial Black', color: '#556677'
     }).setOrigin(0.5);
-
-    this.add.text(W * 0.3, y + 20,
+    this.add.text(W*0.3, H*0.91+20,
       'P1:  A/D = Bewegen  |  W = Springen  |  S = Fast Fall  |  F = Angriff',
       { fontSize: '11px', fontFamily: 'Arial', color: '#445566' }
     ).setOrigin(0.5);
-
-    this.add.text(W * 0.3, y + 36,
+    this.add.text(W*0.3, H*0.91+36,
       'P2:  ←/→ = Bewegen  |  ↑ = Springen  |  ↓ = Fast Fall  |  L = Angriff',
       { fontSize: '11px', fontFamily: 'Arial', color: '#445566' }
     ).setOrigin(0.5);
-  }
 
-  _startGame() {
-    this.scene.start('GameScene');
+    this.add.text(W-10, H-10, 'v0.1 – Prototyp', {
+      fontSize: '11px', fontFamily: 'Arial', color: '#334455'
+    }).setOrigin(1,1);
   }
 }
+
+// ============================================================
+//  HUDScene
+// ============================================================
+class HUDScene extends Phaser.Scene {
+  constructor() { super({ key: 'HUDScene' }); }
+  init(data)    { this.fighters = data.fighters || []; }
+
+  create() {
+    const W = this.scale.width;
+    const H = this.scale.height;
+
+    const hud = this.add.graphics();
+    hud.fillStyle(0x000000, 0.65);
+    hud.fillRect(0, H-130, W, 130);
+    hud.lineStyle(1, 0x4488aa, 0.5);
+    hud.lineBetween(0, H-130, W, H-130);
+    hud.lineStyle(1, 0x334455, 0.8);
+    hud.lineBetween(W/2, H-130, W/2, H);
+
+    this.hudElements = this.fighters.map((f, i) => {
+      const cx = i === 0 ? W*0.25 : W*0.75;
+      const cy = H - 65;
+
+      const bar = this.add.graphics();
+      bar.fillStyle(f.color, 0.8);
+      bar.fillRect(i===0 ? 0 : W/2, H-130, W/2, 4);
+
+      this.add.text(cx, cy-28, f.name, {
+        fontSize: '20px', fontFamily: 'Arial Black',
+        color: '#ffffff', stroke: '#000000', strokeThickness: 4
+      }).setOrigin(0.5);
+
+      const dmg = this.add.text(cx, cy+2, '0%', {
+        fontSize: '42px', fontFamily: 'Arial Black',
+        color: '#00ff88', stroke: '#000000', strokeThickness: 5
+      }).setOrigin(0.5);
+
+      const icons = [];
+      for (let s = 0; s < 4; s++) {
+        const ic = this.add.circle(cx - 30 + s*22, cy+46, 8, f.color, 1);
+        ic.setStrokeStyle(2, 0xffffff, 0.6);
+        icons.push(ic);
+      }
+
+      return { dmg, icons, fighter: f };
+    });
+
+    this.add.text(W/2, 18, 'FOOTBALL LEAGUE OF LEGENDS', {
+      fontSize: '16px', fontFamily: 'Arial Black',
+      color: '#ffcc00', stroke: '#000000', strokeThickness: 3
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 50, 'FREE FOR ALL', {
+      fontSize: '13px', fontFamily: 'Arial', color: '#aaaaaa'
+    }).setOrigin(0.5);
+
+    const hint = this.add.text(W/2, H-145, 'P1: WASD + F  |  P2: Pfeiltasten + L', {
+      fontSize: '12px', fontFamily: 'Arial', color: '#888888'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: hint, alpha: 0, delay: 3500, duration: 800 });
+  }
+
+  update() {
+    if (!this.hudElements) return;
+    this.hudElements.forEach(({ dmg, icons, fighter }) => {
+      const p = Math.floor(fighter.damage);
+      dmg.setText(`${p}%`);
+      dmg.setColor(p < 50 ? '#00ff88' : p < 100 ? '#ffdd00' : p < 150 ? '#ff8800' : '#ff2244');
+      icons.forEach((ic, s) => {
+        ic.setFillStyle(s < fighter.stocks ? fighter.color : 0x222222, 1);
+        ic.setScale(s < fighter.stocks ? 1 : 0.7);
+      });
+    });
+  }
+}
+
+// ============================================================
+//  GameScene
+// ============================================================
+class GameScene extends Phaser.Scene {
+  constructor() { super({ key: 'GameScene' }); }
+
+  create() {
+    const W = this.scale.width;
+    const H = this.scale.height;
+    this.fighters = [];
+    this.gameOver = false;
+
+    // Hintergrund
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(0x0a0a2e, 0x0a0a2e, 0x1a1a4e, 0x1a1a4e, 1);
+    bg.fillRect(0, 0, W, H);
+    for (let i = 0; i < 60; i++) {
+      this.add.circle(
+        Phaser.Math.Between(0, W), Phaser.Math.Between(0, H*0.5),
+        Phaser.Math.FloatBetween(1, 3), 0xffffff, Phaser.Math.FloatBetween(0.3, 0.9)
+      );
+    }
+    const grass = this.add.graphics();
+    grass.fillGradientStyle(0x1a5c1a, 0x1a5c1a, 0x0d3d0d, 0x0d3d0d, 1);
+    grass.fillRect(0, H-80, W, 80);
+
+    // Blast Zone
+    const bz = this.add.graphics();
+    bz.lineStyle(1, 0xff3333, 0.2);
+    bz.strokeRect(200, 100, W-400, H-150);
+    this.add.text(W/2, 108, '— BLAST ZONE —', {
+      fontSize: '11px', fontFamily: 'Arial', color: '#ff3333'
+    }).setOrigin(0.5);
+
+    // Plattformen
+    this.platforms = this.physics.add.staticGroup();
+    const gfx = this.add.graphics();
+    const addPlat = (x, y, w, h, col = 0x4a7fa5) => {
+      gfx.fillStyle(col, 1);
+      gfx.fillRoundedRect(x-w/2, y-h/2, w, h, 6);
+      gfx.lineStyle(2, 0x8899aa, 0.8);
+      gfx.strokeRoundedRect(x-w/2, y-h/2, w, h, 6);
+      const plat = this.add.rectangle(x, y, w, h);
+      this.physics.add.existing(plat, true);
+      this.platforms.add(plat);
+    };
+    addPlat(W/2,       H-100, 760, 24, 0x4a7fa5);
+    addPlat(W/2,       H-280, 280, 18, 0x3a6f95);
+    addPlat(W/2 - 240, H-210, 220, 18, 0x3a6f95);
+    addPlat(W/2 + 240, H-210, 220, 18, 0x3a6f95);
+
+    // Kämpfer
+    const p1 = new Fighter(this, 320, 400, 0, {
+      name: 'P1', color: 0x00ddff,
+      stats: { runSpeed: 370, jumpPower: -760, weight: 100 }
+    });
+    const p2 = new Fighter(this, 960, 400, 1, {
+      name: 'P2', color: 0xff4466,
+      stats: { runSpeed: 340, jumpPower: -780, weight: 110 }
+    });
+    this.fighters = [p1, p2];
+    this.fighters.forEach(f => this.physics.add.collider(f.sprite, this.platforms));
+
+    // Steuerung
+    const kb = this.input.keyboard;
+    this.p1Controls = {
+      left:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+      right:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+      up:     kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      down:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+      jump:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      attack: kb.addKey(Phaser.Input.Keyboard.KeyCodes.F),
+    };
+    this.p2Controls = {
+      left:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
+      right:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
+      up:     kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+      down:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
+      jump:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+      attack: kb.addKey(Phaser.Input.Keyboard.KeyCodes.L),
+    };
+
+    this.scene.launch('HUDScene', { fighters: this.fighters });
+    this.events.on('playerOut', () => this._checkGameOver());
+  }
+
+  update(time, delta) {
+    if (this.gameOver) return;
+    const W = this.scale.width, H = this.scale.height;
+    if (this.fighters[0]?.stocks > 0) this.fighters[0].update(this.p1Controls, delta);
+    if (this.fighters[1]?.stocks > 0) this.fighters[1].update(this.p2Controls, delta);
+    this.fighters.forEach(f => { if (f.stocks > 0 && f.isOutOfBounds(W, H)) f.loseStock(); });
+  }
+
+  _checkGameOver() {
+    const alive = this.fighters.filter(f => f.stocks > 0);
+    if (alive.length <= 1) {
+      this.gameOver = true;
+      const winner = alive.length === 1 ? alive[0].name : 'Unentschieden';
+      this.time.delayedCall(600, () => {
+        this.scene.stop('HUDScene');
+        this.scene.start('MenuScene', { winner });
+      });
+    }
+  }
+}
+
+// ============================================================
+//  Phaser starten
+// ============================================================
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: 1280,
+  height: 720,
+  parent: 'game-container',
+  backgroundColor: '#1a1a2e',
+  physics: {
+    default: 'arcade',
+    arcade: { gravity: { y: 1800 }, debug: false }
+  },
+  scene: [MenuScene, GameScene, HUDScene]
+});
+
+</script>
+</body>
+</html>
