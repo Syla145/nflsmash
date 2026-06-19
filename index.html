@@ -438,53 +438,39 @@ class Fighter {
   }
 
   _redraw() {
-    // Bestimme welcher Frame angezeigt werden soll
     let frameName = 'idle';
-    const body = this.sprite.body;
+    const body   = this.sprite.body;
     const moving = Math.abs(body.velocity.x) > 40;
     const inAir  = !body.blocked.down;
 
-    if (this.state.frozen > 0)        frameName = 'hit';
-    else if (this.state.hitstun > 0)  frameName = 'knocked';
-    else if (this.state.attacking === 'special') frameName = 'special';
-    else if (this.state.attacking)    frameName = 'punch';
-    else if (inAir)                   frameName = 'jump';
-    else if (moving)                  frameName = (this.state.animFrame % 2 === 0) ? 'walk' : 'idle';
-    else                              frameName = 'idle';
+    if      (this.state.frozen > 0)               frameName = 'hit';
+    else if (this.state.hitstun > 0)              frameName = 'knocked';
+    else if (this.state.attacking === 'special')  frameName = 'special';
+    else if (this.state.attacking)                frameName = 'punch';
+    else if (inAir)                               frameName = 'jump';
+    else if (moving) frameName = (this.state.animFrame % 2 === 0) ? 'walk' : 'idle';
+    else             frameName = 'idle';
 
-    // Charakter-spezifisches Frame-Set
-    const frameSets = { allen: ALLEN_FRAMES, bijan: BIJAN_FRAMES, pickens: PICKENS_FRAMES, gibbs: GIBBS_FRAMES };
-    const frameSet = frameSets[this.charData.id] || null;
+    const texKey = `${this.charData.id}_${frameName}`;
 
-    if (this.gfx) { this.gfx.destroy(); this.gfx = null; }
-    if (this.img) { this.img.destroy(); this.img = null; }
-
-    if (frameSet && frameSet[frameName]) {
-      // Echtes Bild anzeigen
-      if (!this._texCache) this._texCache = {};
-      const texKey = `${this.charData.id}_${frameName}`;
-      if (!this.scene.textures.exists(texKey)) {
-        this.scene.textures.addBase64(texKey, frameSet[frameName].split(',')[1]);
-      }
-      // Bild sofort rendern (Texture könnte noch laden)
-      if (this.scene.textures.exists(texKey) && this.scene.textures.get(texKey).key !== '__MISSING') {
-        this.img = this.scene.add.image(this.sprite.x, this.sprite.y, texKey);
-        this.img.setDisplaySize(96, 128);
-        this.img.setDepth(20);
-        if (!this.state.facingRight) this.img.setFlipX(true);
-        // Hitstun-Tint
-        if (this.state.hitstun > 0) this.img.setTint(0xff6666);
-        if (this.state.frozen > 0)  this.img.setTint(0x88ccff);
-      } else {
-        // Fallback während Textur lädt
-        this.gfx = SpriteRenderer.drawPlayer(this.scene, this.sprite.x, this.sprite.y,
-          this.charData, this.state.animFrame, this.state.facingRight, this.state.hitstun, this.state.frozen);
-      }
+    // Altes Image wiederverwenden statt destroy/recreate (besser für Performance)
+    if (!this.img) {
+      this.img = this.scene.add.image(this.sprite.x, this.sprite.y, texKey);
+      this.img.setDisplaySize(100, 130);
+      this.img.setDepth(20);
     } else {
-      // Fallback: Pixel-Art für Charaktere ohne Sprites
-      this.gfx = SpriteRenderer.drawPlayer(this.scene, this.sprite.x, this.sprite.y,
-        this.charData, this.state.animFrame, this.state.facingRight, this.state.hitstun, this.state.frozen);
+      this.img.setTexture(texKey);
+      this.img.setPosition(this.sprite.x, this.sprite.y);
     }
+
+    this.img.setFlipX(!this.state.facingRight);
+    // Tint bei Treffer / Frozen
+    if      (this.state.hitstun > 0) this.img.setTint(0xff6666);
+    else if (this.state.frozen  > 0) this.img.setTint(0x88ccff);
+    else                             this.img.clearTint();
+
+    // Pixel-Art Fallback nicht mehr nötig – alle Chars haben Sprites
+    if (this.gfx) { this.gfx.destroy(); this.gfx = null; }
   }
 
   _doAttack(down, up) {
@@ -656,8 +642,8 @@ class Fighter {
     if (this.stocks <= 0) {
       this.scene.events.emit('playerOut', this.playerIndex);
       this.sprite.setVisible(false);
+      if (this.img) { this.img.setVisible(false); }
       if (this.gfx) { this.gfx.destroy(); this.gfx = null; }
-      if (this.img) { this.img.destroy(); this.img = null; }
       return;
     }
     const spawnX = this.playerIndex === 0 ? 320 : 960;
@@ -894,6 +880,39 @@ class HUDScene extends Phaser.Scene {
 class GameScene extends Phaser.Scene {
   constructor() { super({ key: 'GameScene' }); }
   init(d) { this.p1Idx = d.p1CharIndex??0; this.aiIdx = d.aiCharIndex??1; }
+
+  preload() {
+    // Alle Charakter-Frames als Texturen vorladen BEVOR create() läuft
+    const allFrameSets = {
+      allen:   ALLEN_FRAMES,
+      bijan:   BIJAN_FRAMES,
+      pickens: PICKENS_FRAMES,
+      gibbs:   GIBBS_FRAMES,
+    };
+    const frameNames = ['idle','walk','jump','punch','kick','special','hit','knocked'];
+
+    Object.entries(allFrameSets).forEach(([charId, frames]) => {
+      frameNames.forEach(fname => {
+        const key = `${charId}_${fname}`;
+        if (!this.textures.exists(key) && frames[fname]) {
+          // Base64 direkt als Phaser-Textur laden
+          this.load.image(key, frames[fname]);
+        }
+      });
+    });
+
+    // Ladebalken anzeigen
+    const W = this.scale.width, H = this.scale.height;
+    const bar = this.add.graphics();
+    this.load.on('progress', (v) => {
+      bar.clear();
+      bar.fillStyle(0x000000, 0.7); bar.fillRect(0, H/2-30, W, 60);
+      bar.fillStyle(0x0077cc, 1);   bar.fillRect(W/2-200, H/2-10, 400*v, 20);
+      bar.fillStyle(0x334455, 1);   bar.fillRect(W/2-200, H/2-10, 400, 20);
+      bar.fillStyle(0x0077cc, 1);   bar.fillRect(W/2-200, H/2-10, 400*v, 20);
+    });
+    this.load.on('complete', () => bar.destroy());
+  }
 
   create() {
     const W = this.scale.width, H = this.scale.height;
