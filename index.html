@@ -881,40 +881,72 @@ class GameScene extends Phaser.Scene {
   constructor() { super({ key: 'GameScene' }); }
   init(d) { this.p1Idx = d.p1CharIndex??0; this.aiIdx = d.aiCharIndex??1; }
 
-  preload() {
-    // Alle Charakter-Frames als Texturen vorladen BEVOR create() läuft
-    const allFrameSets = {
-      allen:   ALLEN_FRAMES,
-      bijan:   BIJAN_FRAMES,
-      pickens: PICKENS_FRAMES,
-      gibbs:   GIBBS_FRAMES,
-    };
-    const frameNames = ['idle','walk','jump','punch','kick','special','hit','knocked'];
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    this.fighters = [];
+    this.gameOver  = false;
 
-    Object.entries(allFrameSets).forEach(([charId, frames]) => {
-      frameNames.forEach(fname => {
-        const key = `${charId}_${fname}`;
-        if (!this.textures.exists(key) && frames[fname]) {
-          // Base64 direkt als Phaser-Textur laden
-          this.load.image(key, frames[fname]);
-        }
+    // Ladebildschirm
+    const loadBg = this.add.graphics();
+    loadBg.fillStyle(0x050514, 1);
+    loadBg.fillRect(0, 0, W, H);
+    const loadText = this.add.text(W/2, H/2 - 30, 'Lade Charaktere...', {
+      fontSize: '22px', fontFamily: 'Arial Black', color: '#ffffff'
+    }).setOrigin(0.5);
+    const barBg = this.add.graphics();
+    barBg.fillStyle(0x334455, 1);
+    barBg.fillRect(W/2-200, H/2+10, 400, 16);
+    const barFill = this.add.graphics();
+
+    // Alle Frames zählen und laden
+    const allFrames = { allen:ALLEN_FRAMES, bijan:BIJAN_FRAMES, pickens:PICKENS_FRAMES, gibbs:GIBBS_FRAMES };
+    const names = ['idle','walk','jump','punch','kick','special','hit','knocked'];
+    let total = 0, loaded = 0;
+
+    // Zähle wie viele wir laden müssen
+    Object.entries(allFrames).forEach(([charId, frames]) => {
+      names.forEach(fname => {
+        if (!this.textures.exists(charId+'_'+fname)) total++;
       });
     });
 
-    // Ladebalken anzeigen
-    const W = this.scale.width, H = this.scale.height;
-    const bar = this.add.graphics();
-    this.load.on('progress', (v) => {
-      bar.clear();
-      bar.fillStyle(0x000000, 0.7); bar.fillRect(0, H/2-30, W, 60);
-      bar.fillStyle(0x0077cc, 1);   bar.fillRect(W/2-200, H/2-10, 400*v, 20);
-      bar.fillStyle(0x334455, 1);   bar.fillRect(W/2-200, H/2-10, 400, 20);
-      bar.fillStyle(0x0077cc, 1);   bar.fillRect(W/2-200, H/2-10, 400*v, 20);
+    const onOneLoaded = () => {
+      loaded++;
+      barFill.clear();
+      barFill.fillStyle(0x0077cc, 1);
+      barFill.fillRect(W/2-200, H/2+10, Math.floor(400*(loaded/total)), 16);
+
+      if (loaded >= total) {
+        // Alles geladen – Ladescreen entfernen und Spiel bauen
+        loadBg.destroy(); loadText.destroy(); barBg.destroy(); barFill.destroy();
+        this._buildGame();
+      }
+    };
+
+    // Falls alle Texturen schon existieren (z.B. nach Neustart)
+    if (total === 0) {
+      loadBg.destroy(); loadText.destroy(); barBg.destroy(); barFill.destroy();
+      this._buildGame();
+      return;
+    }
+
+    // Bilder laden
+    Object.entries(allFrames).forEach(([charId, frames]) => {
+      names.forEach(fname => {
+        const key = charId + '_' + fname;
+        if (this.textures.exists(key)) return;
+        const img = new Image();
+        img.onload = () => {
+          try { this.textures.addImage(key, img); } catch(e) {}
+          onOneLoaded();
+        };
+        img.onerror = () => onOneLoaded(); // auch bei Fehler weitermachen
+        img.src = frames[fname];
+      });
     });
-    this.load.on('complete', () => bar.destroy());
   }
 
-  create() {
+  _buildGame() {
     const W = this.scale.width, H = this.scale.height;
     this.fighters = [];
     this.gameOver  = false;
@@ -994,7 +1026,7 @@ class GameScene extends Phaser.Scene {
   }
 
   update(time, delta) {
-    if (this.gameOver) return;
+    if (this.gameOver || !this.fighters || this.fighters.length === 0) return;
     const W=this.scale.width, H=this.scale.height;
     const p1=this.fighters[0], p2=this.fighters[1];
     if (p1?.stocks > 0) p1.update(this.p1Controls, delta, p2);
