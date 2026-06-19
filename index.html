@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>NFL Smash Bros</title>
+  <title>Smash Bros - NFL Edition</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0f; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
@@ -606,7 +606,7 @@ class CharSelectScene extends Phaser.Scene {
     bg.fillRect(0, 0, W, H);
     for (let i=0;i<60;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.FloatBetween(0.5,2),0xffffff,Phaser.Math.FloatBetween(0.2,0.7));
 
-    this.add.text(W/2, 28, 'NFL SMASH BROS', {
+    this.add.text(W/2, 28, 'SMASH BROS — NFL EDITION', {
       fontSize:'22px', fontFamily:'Arial Black', color:'#ffcc00', stroke:'#000', strokeThickness:4
     }).setOrigin(0.5);
     this.add.text(W/2, 62, 'CHARAKTER WÄHLEN', {
@@ -763,7 +763,7 @@ class HUDScene extends Phaser.Scene {
       return { dmg, icons, fighter: f, spLabel, barFill, cx, cy };
     });
 
-    this.add.text(W/2, 18, 'NFL SMASH BROS', {
+    this.add.text(W/2, 18, 'SMASH BROS — NFL EDITION', {
       fontSize:'18px', fontFamily:'Arial Black', color:'#ffcc00', stroke:'#000', strokeThickness:3
     }).setOrigin(0.5);
     this.add.text(W/2, 44, 'FREE FOR ALL  —  VS CPU', {
@@ -864,7 +864,7 @@ class GameScene extends Phaser.Scene {
         const platTop  = plat.y - plat.height/2;
         const sprBot   = sprite.y + sprite.height/2;
         const falling  = body.velocity.y > 0;
-        const dropping = false; // S fällt NICHT durch Plattformen
+        const dropping = f.state.fastFalling; // S = durch Plattform fallen
         if (dropping) return false;
         return falling && (sprBot - platTop) < 18;
       });
@@ -922,8 +922,8 @@ class MenuScene extends Phaser.Scene {
     for(let i=0;i<80;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.FloatBetween(0.5,2.5),0xffffff,Phaser.Math.FloatBetween(0.2,0.8));
 
     this.add.text(W/2,H*0.14,'🏈',{fontSize:'64px'}).setOrigin(0.5);
-    this.add.text(W/2,H*0.28,'NFL SMASH',{fontSize:'60px',fontFamily:'Arial Black',color:'#ffcc00',stroke:'#aa6600',strokeThickness:8}).setOrigin(0.5);
-    this.add.text(W/2,H*0.42,'BROS',{fontSize:'32px',fontFamily:'Arial Black',color:'#ffffff',stroke:'#003366',strokeThickness:5}).setOrigin(0.5);
+    this.add.text(W/2,H*0.28,'SMASH BROS',{fontSize:'60px',fontFamily:'Arial Black',color:'#ffcc00',stroke:'#aa6600',strokeThickness:8}).setOrigin(0.5);
+    this.add.text(W/2,H*0.42,'NFL EDITION',{fontSize:'32px',fontFamily:'Arial Black',color:'#ffffff',stroke:'#003366',strokeThickness:5}).setOrigin(0.5);
     this.add.text(W/2,H*0.51,'★  ★  ★  ★  ★',{fontSize:'20px',color:'#ffaa00'}).setOrigin(0.5);
 
     if(this.winner){
