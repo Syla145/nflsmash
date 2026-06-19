@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <title>Smash Bros - NFL Edition</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Barlow+Condensed:wght@400;700;900&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0f; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
@@ -683,83 +685,128 @@ class CharSelectScene extends Phaser.Scene {
     const W = this.scale.width, H = this.scale.height;
     this.p1Selected = 0;
     this.selectionConfirmed = false;
+    this.aiCharIndex = Phaser.Math.Between(0, CHARACTERS.length-1);
 
+    // BG
     const bg = this.add.graphics();
-    bg.fillGradientStyle(0x050514, 0x050514, 0x0a1a35, 0x0a1a35, 1);
+    bg.fillGradientStyle(0x020408, 0x020408, 0x061020, 0x061020, 1);
     bg.fillRect(0, 0, W, H);
-    for (let i=0;i<60;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.FloatBetween(0.5,2),0xffffff,Phaser.Math.FloatBetween(0.2,0.7));
+    for (let i=0;i<50;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H*0.7),Phaser.Math.FloatBetween(0.5,2),0xffffff,Phaser.Math.FloatBetween(0.1,0.5));
 
-    this.add.text(W/2, 28, 'SMASH BROS — NFL EDITION', {
-      fontSize:'22px', fontFamily:'Arial Black', color:'#ffcc00', stroke:'#000', strokeThickness:4
-    }).setOrigin(0.5);
-    this.add.text(W/2, 62, 'CHARAKTER WÄHLEN', {
-      fontSize:'16px', fontFamily:'Arial Black', color:'#aaccff', stroke:'#000', strokeThickness:3
+    // Header
+    const headerBg = this.add.graphics();
+    headerBg.fillStyle(0xcc0000, 1);
+    headerBg.fillRect(0, 0, W, 58);
+    headerBg.fillStyle(0x000000, 0.3);
+    headerBg.fillRect(0, 54, W, 4);
+
+    this.add.text(W/2, 29, 'CHARAKTER WÄHLEN', {
+      fontSize: '30px',
+      fontFamily: '"Oswald", "Arial Black", sans-serif',
+      fontStyle: 'bold',
+      color: '#ffffff',
+      letterSpacing: 6,
     }).setOrigin(0.5);
 
-    // Charakter-Vorschau mit Pixel-Art (kleiner)
+    // CPU Badge
+    const cpuBg = this.add.graphics();
+    cpuBg.fillStyle(0x111111, 0.9);
+    cpuBg.fillRoundedRect(W-200, 8, 192, 42, 6);
+    cpuBg.lineStyle(1, 0xcc0000, 1);
+    cpuBg.strokeRoundedRect(W-200, 8, 192, 42, 6);
+    this.add.text(W-104, 29,
+      `🤖 CPU: ${CHARACTERS[this.aiCharIndex].emoji} ${CHARACTERS[this.aiCharIndex].name}`,
+      { fontSize:'12px', fontFamily:'"Barlow Condensed", Arial, sans-serif', color:'#dddddd' }
+    ).setOrigin(0.5);
+
+    // Charakter-Karten
     this.cards = [];
-    const cardW = 260, cardH = 330;
-    const totalW = CHARACTERS.length * (cardW + 20) - 20;
+    const cardW = 270, cardH = 340;
+    const totalW = CHARACTERS.length * (cardW + 16) - 16;
     const startX = (W - totalW) / 2 + cardW / 2;
 
     CHARACTERS.forEach((char, i) => {
-      const cx = startX + i * (cardW + 20);
-      const cy = H / 2 + 25;
+      const cx = startX + i * (cardW + 16);
+      const cy = H / 2 + 38;
 
       const card = this.add.graphics();
       const drawCard = (sel) => {
         card.clear();
-        card.fillStyle(sel ? 0x1a3a6a : 0x0d1a2e, 1);
-        card.fillRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 14);
-        card.lineStyle(sel ? 4 : 2, sel ? 0x44aaff : 0x334466, 1);
-        card.strokeRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 14);
+        // Schatten
+        card.fillStyle(0x000000, 0.5);
+        card.fillRoundedRect(cx-cardW/2+3, cy-cardH/2+3, cardW, cardH, 10);
+        // Karte
+        card.fillStyle(sel ? 0x0a1f3d : 0x080f1e, 1);
+        card.fillRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 10);
+        // Farbstreifen oben
+        card.fillStyle(parseInt(char.colorHex.replace('#',''), 16), sel ? 1.0 : 0.7);
+        card.fillRoundedRect(cx-cardW/2, cy-cardH/2, cardW, 6, 2);
+        // Rand
+        card.lineStyle(sel ? 3 : 1, sel ? parseInt(char.colorHex.replace('#',''), 16) : 0x222244, 1);
+        card.strokeRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 10);
+        // Glow bei Auswahl
+        if (sel) {
+          card.lineStyle(8, parseInt(char.colorHex.replace('#',''), 16), 0.15);
+          card.strokeRoundedRect(cx-cardW/2-4, cy-cardH/2-4, cardW+8, cardH+8, 12);
+        }
       };
       drawCard(i === 0);
 
-      // Charakter-Farb-Band oben
-      const band = this.add.graphics();
-      band.fillStyle(char.color, 0.8);
-      band.fillRoundedRect(cx-cardW/2+10, cy-cardH/2+10, cardW-20, 8, 4);
-
       // Nummer-Badge
-      const badge = this.add.graphics();
-      badge.fillStyle(char.color, 1);
-      badge.fillCircle(cx+cardW/2-28, cy-cardH/2+30, 22);
-      this.add.text(cx+cardW/2-28, cy-cardH/2+30, char.number, {
-        fontSize:'16px', fontFamily:'Arial Black', color:'#fff'
+      const numBg = this.add.graphics();
+      numBg.fillStyle(parseInt(char.colorHex.replace('#',''), 16), 1);
+      numBg.fillCircle(cx+cardW/2-22, cy-cardH/2+22, 20);
+      this.add.text(cx+cardW/2-22, cy-cardH/2+22, `#${char.number}`, {
+        fontSize:'13px', fontFamily:'"Oswald", Arial, sans-serif', fontStyle:'bold', color:'#fff'
       }).setOrigin(0.5);
 
-      // Emoji groß
-      this.add.text(cx, cy-80, char.emoji, { fontSize:'60px' }).setOrigin(0.5);
+      // Emoji
+      this.add.text(cx, cy-95, char.emoji, { fontSize:'52px' }).setOrigin(0.5);
 
       // Name
-      this.add.text(cx, cy+16, char.name, {
-        fontSize:'17px', fontFamily:'Arial Black', color:'#ffffff',
-        stroke:'#000', strokeThickness:3, wordWrap:{width:cardW-20}, align:'center'
+      this.add.text(cx, cy-30, char.name.toUpperCase(), {
+        fontSize: '18px',
+        fontFamily: '"Oswald", "Arial Black", sans-serif',
+        fontStyle: 'bold',
+        color: '#ffffff',
+        letterSpacing: 1,
       }).setOrigin(0.5);
 
-      this.add.text(cx, cy+46, char.description, {
-        fontSize:'12px', fontFamily:'Arial', color:'#aaaaaa'
+      this.add.text(cx, cy+0, char.description, {
+        fontSize:'11px', fontFamily:'"Barlow Condensed", Arial, sans-serif', color:'#888899'
       }).setOrigin(0.5);
 
-      this.add.text(cx, cy+72, `✨ ${char.special}`, {
-        fontSize:'13px', fontFamily:'Arial Black', color:char.colorHex, stroke:'#000', strokeThickness:2
+      // Special
+      const spBg = this.add.graphics();
+      spBg.fillStyle(parseInt(char.colorHex.replace('#',''), 16), 0.15);
+      spBg.fillRoundedRect(cx-cardW/2+10, cy+16, cardW-20, 38, 6);
+      spBg.lineStyle(1, parseInt(char.colorHex.replace('#',''), 16), 0.4);
+      spBg.strokeRoundedRect(cx-cardW/2+10, cy+16, cardW-20, 38, 6);
+      this.add.text(cx, cy+28, `✨ ${char.special}`, {
+        fontSize:'13px', fontFamily:'"Oswald", Arial, sans-serif', fontStyle:'bold',
+        color:char.colorHex
+      }).setOrigin(0.5);
+      this.add.text(cx, cy+46, char.specialDesc, {
+        fontSize:'10px', fontFamily:'"Barlow Condensed", Arial, sans-serif', color:'#aaaaaa',
+        wordWrap:{width:cardW-24}, align:'center'
       }).setOrigin(0.5);
 
-      this.add.text(cx, cy+96, char.specialDesc, {
-        fontSize:'11px', fontFamily:'Arial', color:'#cccccc', wordWrap:{width:cardW-20}, align:'center'
-      }).setOrigin(0.5);
+      // Stats
+      const statY = cy + 76;
+      [['SPD', (char.stats.runSpeed-300)/200], ['WGT', (char.stats.weight-80)/40]].forEach(([label, val], si) => {
+        const sy = statY + si * 22;
+        this.add.text(cx-cardW/2+12, sy, label, {
+          fontSize:'10px', fontFamily:'"Oswald", Arial, sans-serif', color:'#666677'
+        });
+        const barW = cardW - 60;
+        const sg = this.add.graphics();
+        sg.fillStyle(0x111122, 1);
+        sg.fillRoundedRect(cx-cardW/2+44, sy, barW, 10, 5);
+        sg.fillStyle(si===0 ? 0x00cc66 : 0xff8800, 1);
+        sg.fillRoundedRect(cx-cardW/2+44, sy, Math.floor(barW*Math.min(val,1)), 10, 5);
+      });
 
-      // Stat-Balken (Speed / Weight)
-      const barY = cy + 130;
-      this.add.text(cx-cardW/2+14, barY,    'SPD', {fontSize:'10px', color:'#88aacc'});
-      this.add.text(cx-cardW/2+14, barY+18, 'WGT', {fontSize:'10px', color:'#88aacc'});
-      const sg = this.add.graphics();
-      sg.fillStyle(0x00ff88,1);
-      sg.fillRoundedRect(cx-cardW/2+40, barY+1, Math.floor(((char.stats.runSpeed-300)/200)*(cardW-80)), 8, 4);
-      sg.fillStyle(0xff8800,1);
-      sg.fillRoundedRect(cx-cardW/2+40, barY+19, Math.floor(((char.stats.weight-80)/40)*(cardW-80)), 8, 4);
-
+      // Klick
       const zone = this.add.zone(cx, cy, cardW, cardH).setInteractive();
       zone.on('pointerover',  () => { drawCard(true);  this.input.setDefaultCursor('pointer'); });
       zone.on('pointerout',   () => { drawCard(i===this.p1Selected); this.input.setDefaultCursor('default'); });
@@ -768,15 +815,20 @@ class CharSelectScene extends Phaser.Scene {
       this.cards.push({ draw: drawCard, i });
     });
 
-    this.aiCharIndex = Phaser.Math.Between(0, CHARACTERS.length-1);
-    this.add.text(W-20, 28, '🤖 CPU: '+CHARACTERS[this.aiCharIndex].emoji+' '+CHARACTERS[this.aiCharIndex].name, {
-      fontSize:'13px', fontFamily:'Arial Black', color:'#ff8866', stroke:'#000', strokeThickness:3
-    }).setOrigin(1,0);
+    // Footer
+    const footBg = this.add.graphics();
+    footBg.fillStyle(0x000000, 0.7);
+    footBg.fillRect(0, H-52, W, 52);
+    footBg.lineStyle(1, 0xcc0000, 0.6);
+    footBg.lineBetween(0, H-52, W, H-52);
 
-    this.add.text(W/2, H-50, '⚔️  VS COMPUTER  —  Klick zum Auswählen  —  LEERTASTE zum Starten', {
-      fontSize:'13px', fontFamily:'Arial Black', color:'#aaccff', stroke:'#000', strokeThickness:2
-    }).setOrigin(0.5);
+    this.add.text(W/2, H-26,
+      '← → AUSWÄHLEN   •   KLICKEN ZUM WÄHLEN   •   LEERTASTE / ENTER = STARTEN',
+      { fontSize:'12px', fontFamily:'"Barlow Condensed", Arial, sans-serif',
+        color:'#888888', letterSpacing:2 }
+    ).setOrigin(0.5);
 
+    // Keyboard
     this.input.keyboard.on('keydown-LEFT',  () => { this.p1Selected=Math.max(0,this.p1Selected-1); this.cards.forEach(c=>c.draw(c.i===this.p1Selected)); });
     this.input.keyboard.on('keydown-RIGHT', () => { this.p1Selected=Math.min(CHARACTERS.length-1,this.p1Selected+1); this.cards.forEach(c=>c.draw(c.i===this.p1Selected)); });
     this.input.keyboard.once('keydown-SPACE', () => this._start());
@@ -789,6 +841,7 @@ class CharSelectScene extends Phaser.Scene {
     this.scene.start('GameScene', { p1CharIndex: this.p1Selected, aiCharIndex: this.aiCharIndex });
   }
 }
+
 
 // ============================================================
 //  HUDScene
@@ -1132,39 +1185,172 @@ class MenuScene extends Phaser.Scene {
 
   create() {
     const W=this.scale.width, H=this.scale.height;
-    const bg=this.add.graphics();
-    bg.fillGradientStyle(0x050510,0x050510,0x0d1a2e,0x0d1a2e,1);
-    bg.fillRect(0,0,W,H);
-    for(let i=0;i<80;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.FloatBetween(0.5,2.5),0xffffff,Phaser.Math.FloatBetween(0.2,0.8));
 
-    this.add.text(W/2,H*0.14,'🏈',{fontSize:'64px'}).setOrigin(0.5);
-    this.add.text(W/2,H*0.28,'SMASH BROS',{fontSize:'60px',fontFamily:'Arial Black',color:'#ffcc00',stroke:'#aa6600',strokeThickness:8}).setOrigin(0.5);
-    this.add.text(W/2,H*0.42,'NFL EDITION',{fontSize:'32px',fontFamily:'Arial Black',color:'#ffffff',stroke:'#003366',strokeThickness:5}).setOrigin(0.5);
-    this.add.text(W/2,H*0.51,'★  ★  ★  ★  ★',{fontSize:'20px',color:'#ffaa00'}).setOrigin(0.5);
+    // === HINTERGRUND: NFL-Stadion Nacht ===
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(0x020408, 0x020408, 0x061020, 0x061020, 1);
+    bg.fillRect(0, 0, W, H);
 
-    if(this.winner){
-      const msg=this.winnerIsPlayer?`🏆 ${this.winner} GEWINNT!`:this.winner==='Unentschieden'?'🤝 UNENTSCHIEDEN!':`🤖 CPU GEWINNT! (${this.winner})`;
-      const col=this.winnerIsPlayer?'#ffdd00':this.winner==='Unentschieden'?'#aaaaff':'#ff6644';
-      this.add.text(W/2,H*0.62,msg,{fontSize:'34px',fontFamily:'Arial Black',color:col,stroke:'#000',strokeThickness:5}).setOrigin(0.5);
+    // Rasen unten
+    const grass = this.add.graphics();
+    grass.fillStyle(0x0d3d0d, 1);
+    grass.fillRect(0, H*0.72, W, H*0.28);
+    for (let i=0;i<10;i++) {
+      grass.fillStyle(i%2===0 ? 0x0f4a0f : 0x0b350b, 1);
+      grass.fillRect(i*(W/10), H*0.72, W/10, H*0.28);
+    }
+    // Yard-Linien
+    const yl = this.add.graphics();
+    yl.lineStyle(1, 0x1a6b1a, 0.5);
+    for (let i=0;i<=10;i++) yl.lineBetween(i*(W/10), H*0.72, i*(W/10), H);
+    yl.lineStyle(2, 0x22aa22, 0.4);
+    yl.lineBetween(W/2, H*0.72, W/2, H);
+
+    // Stadionlichter Strahlen
+    const rays = this.add.graphics();
+    rays.fillStyle(0xffffff, 0.025);
+    [[0.1,0],[0.3,0],[0.5,0],[0.7,0],[0.9,0]].forEach(([fx]) => {
+      rays.fillTriangle(fx*W-80, 0, fx*W+80, 0, fx*W, H*0.72);
+    });
+
+    // Sterne
+    for(let i=0;i<60;i++) {
+      const sx=Phaser.Math.Between(0,W), sy=Phaser.Math.Between(0,H*0.65);
+      this.add.circle(sx,sy,Phaser.Math.FloatBetween(0.5,2),0xffffff,Phaser.Math.FloatBetween(0.2,0.7));
     }
 
-    const btnY=this.winner?H*0.79:H*0.67;
-    const btnBg=this.add.graphics();
-    const drawBtn=(col,brd)=>{ btnBg.clear(); btnBg.fillStyle(col,1); btnBg.fillRoundedRect(W/2-170,btnY-30,340,58,12); btnBg.lineStyle(2,brd,0.9); btnBg.strokeRoundedRect(W/2-170,btnY-30,340,58,12); };
-    drawBtn(0x1a5fa0,0x44aaff);
-    this.add.text(W/2,btnY,'▶  CHARAKTER WÄHLEN',{fontSize:'22px',fontFamily:'Arial Black',color:'#fff',stroke:'#000',strokeThickness:3}).setOrigin(0.5);
-    const z=this.add.zone(W/2,btnY,340,58).setInteractive();
-    z.on('pointerover',()=>{drawBtn(0x2a7fd0,0x88ccff);this.input.setDefaultCursor('pointer');});
-    z.on('pointerout', ()=>{drawBtn(0x1a5fa0,0x44aaff);this.input.setDefaultCursor('default');});
-    z.on('pointerdown',()=>this.scene.start('CharSelectScene'));
-    this.input.keyboard.once('keydown-SPACE',()=>this.scene.start('CharSelectScene'));
-    this.input.keyboard.once('keydown-ENTER',()=>this.scene.start('CharSelectScene'));
+    // === NFL-LOGO BEREICH ===
+    // Rote Balken links und rechts (NFL-typisch)
+    const accent = this.add.graphics();
+    accent.fillStyle(0xcc0000, 1);
+    accent.fillRect(0, H*0.18, W*0.12, 5);
+    accent.fillRect(W*0.88, H*0.18, W*0.12, 5);
+    accent.fillRect(0, H*0.42, W*0.08, 3);
+    accent.fillRect(W*0.92, H*0.42, W*0.08, 3);
 
-    const press=this.add.text(W/2,btnY+52,'oder LEERTASTE drücken',{fontSize:'13px',fontFamily:'Arial',color:'#667788'}).setOrigin(0.5);
-    this.tweens.add({targets:press,alpha:0.2,duration:900,yoyo:true,repeat:-1});
+    // Haupttitel
+    this.add.text(W/2, H*0.13, 'SMASH BROS', {
+      fontSize: '88px',
+      fontFamily: '"Oswald", "Arial Black", sans-serif',
+      fontStyle: 'bold',
+      color: '#ffffff',
+      stroke: '#cc0000',
+      strokeThickness: 6,
+    }).setOrigin(0.5);
 
-    this.add.text(W/2,H*0.91,'🎮  WASD=Bewegen | W=Springen | S=Fast Fall | J=Nahkampf | K=Fernattacke | L=Special (30s)',{fontSize:'12px',fontFamily:'Arial Black',color:'#556677'}).setOrigin(0.5);
-    this.add.text(W-10,H-10,'v0.4',{fontSize:'11px',color:'#334455'}).setOrigin(1,1);
+    // NFL EDITION Subtitle
+    const subBg = this.add.graphics();
+    subBg.fillStyle(0xcc0000, 1);
+    subBg.fillRect(W/2 - 220, H*0.285, 440, 52);
+    this.add.text(W/2, H*0.31, '🏈  NFL EDITION  🏈', {
+      fontSize: '28px',
+      fontFamily: '"Barlow Condensed", "Arial Black", sans-serif',
+      fontStyle: 'bold',
+      color: '#ffffff',
+      letterSpacing: 4,
+    }).setOrigin(0.5);
+
+    // Charakter-Silhouetten als Teaser
+    const chars = this.add.graphics();
+    chars.fillStyle(0xffffff, 0.06);
+    chars.fillRect(W*0.05, H*0.38, 140, 220);
+    chars.fillRect(W*0.78, H*0.38, 140, 220);
+
+    // Team-Farb-Streifen
+    const stripes = this.add.graphics();
+    [[0x0077cc,0],[0xcc0000,1],[0x003594,2],[0xffaa00,3]].forEach(([col,idx]) => {
+      stripes.fillStyle(col, 0.7);
+      stripes.fillRect(W*0.38 + idx*26, H*0.44, 22, 6);
+    });
+    this.add.text(W/2, H*0.46, 'Josh Allen  •  Bijan Robinson  •  George Pickens  •  Jahmyr Gibbs', {
+      fontSize: '13px',
+      fontFamily: '"Barlow Condensed", Arial, sans-serif',
+      color: '#aaaaaa',
+      letterSpacing: 1,
+    }).setOrigin(0.5);
+
+    // Winner-Anzeige
+    if(this.winner) {
+      const isPlayer = this.winnerIsPlayer;
+      const isDraw   = this.winner === 'Unentschieden';
+      const msg = isPlayer ? `🏆  ${this.winner.toUpperCase()}  GEWINNT!`
+                : isDraw   ? '🤝  UNENTSCHIEDEN'
+                           : `🤖  CPU GEWINNT — ${this.winner.toUpperCase()}`;
+      const col = isPlayer ? '#ffdd00' : isDraw ? '#aaaaff' : '#ff6644';
+
+      const winBg = this.add.graphics();
+      winBg.fillStyle(0x000000, 0.6);
+      winBg.fillRoundedRect(W/2-280, H*0.49, 560, 56, 8);
+      winBg.lineStyle(2, isPlayer?0xffdd00:isDraw?0x8888ff:0xff4400, 1);
+      winBg.strokeRoundedRect(W/2-280, H*0.49, 560, 56, 8);
+
+      this.add.text(W/2, H*0.518, msg, {
+        fontSize: '26px',
+        fontFamily: '"Oswald", "Arial Black", sans-serif',
+        fontStyle: 'bold',
+        color: col,
+      }).setOrigin(0.5);
+    }
+
+    // === START BUTTON ===
+    const btnY = this.winner ? H*0.66 : H*0.60;
+
+    const btnBg = this.add.graphics();
+    const drawBtn = (hover) => {
+      btnBg.clear();
+      // Schatten
+      btnBg.fillStyle(0x000000, 0.4);
+      btnBg.fillRoundedRect(W/2-202, btnY-28+4, 404, 58, 6);
+      // Button
+      btnBg.fillStyle(hover ? 0xee1111 : 0xcc0000, 1);
+      btnBg.fillRoundedRect(W/2-202, btnY-28, 404, 58, 6);
+      // Highlight-Linie oben
+      btnBg.fillStyle(0xffffff, hover ? 0.25 : 0.15);
+      btnBg.fillRoundedRect(W/2-202, btnY-28, 404, 4, 2);
+    };
+    drawBtn(false);
+
+    this.add.text(W/2, btnY, 'CHARAKTER WÄHLEN', {
+      fontSize: '26px',
+      fontFamily: '"Oswald", "Arial Black", sans-serif',
+      fontStyle: 'bold',
+      color: '#ffffff',
+      letterSpacing: 2,
+    }).setOrigin(0.5);
+
+    const zone = this.add.zone(W/2, btnY, 404, 58).setInteractive();
+    zone.on('pointerover',  () => { drawBtn(true);  this.input.setDefaultCursor('pointer'); });
+    zone.on('pointerout',   () => { drawBtn(false); this.input.setDefaultCursor('default'); });
+    zone.on('pointerdown',  () => this.scene.start('CharSelectScene'));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('CharSelectScene'));
+    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('CharSelectScene'));
+
+    // Pulsierender Hinweis
+    const press = this.add.text(W/2, btnY+44, 'LEERTASTE  oder  KLICKEN', {
+      fontSize: '12px',
+      fontFamily: '"Barlow Condensed", Arial, sans-serif',
+      color: '#666677',
+      letterSpacing: 3,
+    }).setOrigin(0.5);
+    this.tweens.add({targets:press, alpha:0.2, duration:1000, yoyo:true, repeat:-1});
+
+    // Steuerung
+    const ctrlBg = this.add.graphics();
+    ctrlBg.fillStyle(0x000000, 0.5);
+    ctrlBg.fillRect(0, H*0.86, W, H*0.14);
+    ctrlBg.lineStyle(1, 0x333333, 1);
+    ctrlBg.lineBetween(0, H*0.86, W, H*0.86);
+
+    this.add.text(W/2, H*0.895, 'STEUERUNG', {
+      fontSize:'11px', fontFamily:'"Oswald", Arial, sans-serif',
+      color:'#cc0000', letterSpacing:3
+    }).setOrigin(0.5);
+    this.add.text(W/2, H*0.935,
+      'A/D = Bewegen   W = Springen   S = Fast Fall   J = Nahkampf   K = Fernattacke   L = Special',
+      { fontSize:'12px', fontFamily:'"Barlow Condensed", Arial, sans-serif', color:'#888899', letterSpacing:1 }
+    ).setOrigin(0.5);
+
+    this.add.text(W-10, H-8, 'v0.5', {fontSize:'10px', color:'#333344'}).setOrigin(1,1);
   }
 }
 
