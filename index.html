@@ -2,18 +2,10 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Football League of Legends</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #0a0a0f;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      overflow: hidden;
-    }
+    body { background: #0a0a0f; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
     canvas { display: block; border: 2px solid #222; }
   </style>
 </head>
@@ -23,12 +15,143 @@
 <script>
 
 // ============================================================
+//  CHARAKTER-DEFINITIONEN
+// ============================================================
+const CHARACTERS = [
+  {
+    id: 'allen',
+    name: 'Josh Allen',
+    nickname: 'THE BLIZZARD',
+    number: '17',
+    color: 0x0077cc,
+    colorHex: '#0077cc',
+    emoji: '❄️',
+    description: 'QB | Buffalo Bills',
+    special: 'Blizzard Storm',
+    specialDesc: 'Schnee-Sturm verlangsamt Gegner',
+    stats: { runSpeed: 340, jumpPower: -780, weight: 115, airSpeed: 190 },
+    specialCooldown: 6000,
+  },
+  {
+    id: 'bijan',
+    name: 'Bijan Robinson',
+    nickname: 'THE FALCON',
+    number: '7',
+    color: 0xcc0000,
+    colorHex: '#cc0000',
+    emoji: '🦅',
+    description: 'RB | Atlanta Falcons',
+    special: 'Falcon Dive',
+    specialDesc: 'Sturzflug-Angriff von oben',
+    stats: { runSpeed: 420, jumpPower: -820, weight: 95, airSpeed: 240 },
+    specialCooldown: 5000,
+  },
+  {
+    id: 'pickens',
+    name: 'George Pickens',
+    nickname: 'THE COWBOY',
+    number: '14',
+    color: 0x003594,
+    colorHex: '#003594',
+    emoji: '🤠',
+    description: 'WR | Dallas Cowboys',
+    special: 'Lasso Throw',
+    specialDesc: 'Lasso zieht Gegner heran',
+    stats: { runSpeed: 380, jumpPower: -800, weight: 90, airSpeed: 230 },
+    specialCooldown: 7000,
+  },
+  {
+    id: 'gibbs',
+    name: 'Jahmyr Gibbs',
+    nickname: 'THE SONIC',
+    number: '26',
+    color: 0xffaa00,
+    colorHex: '#ffaa00',
+    emoji: '⚡',
+    description: 'RB | Detroit Lions',
+    special: 'Speed Dash',
+    specialDesc: 'Blitz-Sprint durch Gegner',
+    stats: { runSpeed: 480, jumpPower: -760, weight: 85, airSpeed: 280 },
+    specialCooldown: 4000,
+  },
+];
+
+// ============================================================
+//  AI Controller
+// ============================================================
+class AIController {
+  constructor(fighter, target) {
+    this.fighter = fighter;
+    this.target  = target;
+    this.actionTimer = 0;
+    this.currentAction = null;
+    this.jumpCooldown = 0;
+    this.attackCooldown = 0;
+    this.specialCooldown = 0;
+    // Fake key states
+    this.keys = { left: false, right: false, up: false, down: false, jump: false, attack: false, special: false };
+  }
+
+  update(delta) {
+    this.actionTimer   -= delta;
+    this.jumpCooldown  -= delta;
+    this.attackCooldown-= delta;
+
+    const f  = this.fighter;
+    const t  = this.target;
+    if (!t || t.stocks <= 0) return this.keys;
+
+    const dx = t.sprite.x - f.sprite.x;
+    const dy = t.sprite.y - f.sprite.y;
+    const dist = Math.abs(dx);
+    const onGround = f.sprite.body.blocked.down;
+
+    // Reset keys
+    Object.keys(this.keys).forEach(k => this.keys[k] = false);
+
+    // Move toward target
+    if (dist > 60) {
+      if (dx > 0) this.keys.right = true;
+      else        this.keys.left  = true;
+    }
+
+    // Jump to reach target
+    if (dy < -80 && onGround && this.jumpCooldown <= 0) {
+      this.keys.jump = true;
+      this.jumpCooldown = 800;
+    }
+
+    // Jump over edge (don't fall off)
+    if (f.sprite.x < 260 && onGround && this.jumpCooldown <= 0) {
+      this.keys.right = true;
+      this.keys.jump  = true;
+      this.jumpCooldown = 600;
+    }
+    if (f.sprite.x > 1020 && onGround && this.jumpCooldown <= 0) {
+      this.keys.left = true;
+      this.keys.jump = true;
+      this.jumpCooldown = 600;
+    }
+
+    // Attack when close
+    if (dist < 100 && this.attackCooldown <= 0) {
+      this.keys.attack = true;
+      this.attackCooldown = 500 + Math.random() * 300;
+    }
+
+    return this.keys;
+  }
+}
+
+// ============================================================
 //  Fighter – Basis-Klasse
 // ============================================================
 class Fighter {
-  constructor(scene, x, y, playerIndex, config = {}) {
-    this.scene = scene;
+  constructor(scene, x, y, playerIndex, charData, isAI = false) {
+    this.scene       = scene;
     this.playerIndex = playerIndex;
+    this.charData    = charData;
+    this.isAI        = isAI;
 
     this.stats = {
       walkSpeed:     220,
@@ -39,23 +162,26 @@ class Fighter {
       fastFallSpeed: 1400,
       weight:        100,
       jumpCount:     2,
-      ...config.stats
+      ...charData.stats
     };
 
-    this.name       = config.name  || `P${playerIndex + 1}`;
-    this.color      = config.color || (playerIndex === 0 ? 0x00ddff : 0xff4466);
-    this.stocks     = 4;
-    this.damage     = 0;
-    this.jumpsLeft  = this.stats.jumpCount;
+    this.name      = charData.name;
+    this.color     = charData.color;
+    this.stocks    = 4;
+    this.damage    = 0;
+    this.jumpsLeft = this.stats.jumpCount;
+    this.specialCooldownMax = charData.specialCooldown || 6000;
+    this.specialCooldown    = 0;
 
     this.state = {
       attacking:   false,
       hitstun:     0,
       fastFalling: false,
       facingRight: playerIndex === 0,
+      frozen:      0,   // Allen's blizzard effect
     };
 
-    // Sprite: einfaches Rechteck + Physik
+    // Sprite
     this.sprite = scene.add.rectangle(x, y, 48, 64, this.color);
     scene.physics.add.existing(this.sprite);
     this.sprite.body.setMaxVelocity(800, 1800);
@@ -63,42 +189,67 @@ class Fighter {
     this.sprite.body.setCollideWorldBounds(false);
     this.sprite.owner = this;
 
-    this.label = scene.add.text(x, y - 42, this.name, {
-      fontSize: '14px', fontFamily: 'Arial Black',
-      color: '#ffffff', stroke: '#000000', strokeThickness: 3
-    }).setOrigin(0.5);
-
-    this.damageLabel = scene.add.text(x, y - 58, '0%', {
-      fontSize: '12px', fontFamily: 'Arial Black',
-      color: '#ffdd00', stroke: '#000000', strokeThickness: 3
-    }).setOrigin(0.5);
+    // Name inside sprite (no overflow)
+    this.nameText = scene.add.text(x, y, charData.number, {
+      fontSize: '22px', fontFamily: 'Arial Black',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 4,
+      alpha: 0.9
+    }).setOrigin(0.5).setDepth(10);
 
     this.attackCooldown = 0;
+
+    if (isAI) this.ai = null; // set later
+  }
+
+  setAITarget(target) {
+    this.ai = new AIController(this, target);
   }
 
   update(cursors, delta) {
+    // If AI, generate cursors from AI
+    if (this.isAI && this.ai) cursors = this.ai.update(delta);
+
     const body     = this.sprite.body;
     const onGround = body.blocked.down;
 
+    // Frozen effect (Allen special)
+    if (this.state.frozen > 0) {
+      this.state.frozen -= delta;
+      this.sprite.setFillStyle(0x88ccff);
+      this._updateSprite();
+      return;
+    } else {
+      this.sprite.setFillStyle(this.color);
+    }
+
     if (this.state.hitstun > 0) {
       this.state.hitstun -= delta;
-      this._updateLabels();
+      this._updateSprite();
       return;
     }
 
-    if (this.attackCooldown > 0) this.attackCooldown -= delta;
+    if (this.attackCooldown  > 0) this.attackCooldown  -= delta;
+    if (this.specialCooldown > 0) this.specialCooldown -= delta;
 
     // Bewegung
-    if (cursors.left.isDown) {
+    const isJustLeft  = this.isAI ? cursors.left  : cursors.left.isDown;
+    const isJustRight = this.isAI ? cursors.right : cursors.right.isDown;
+    const isDown      = this.isAI ? cursors.down  : cursors.down.isDown;
+    const isUp        = this.isAI ? cursors.up    : cursors.up.isDown;
+    const jumpPressed = this.isAI ? cursors.jump  : Phaser.Input.Keyboard.JustDown(cursors.jump);
+    const atkPressed  = this.isAI ? cursors.attack: Phaser.Input.Keyboard.JustDown(cursors.attack);
+    const spPressed   = this.isAI ? cursors.special: (cursors.special && Phaser.Input.Keyboard.JustDown(cursors.special));
+
+    if (isJustLeft) {
       body.setVelocityX(onGround ? -this.stats.runSpeed : -this.stats.airSpeed);
       this.state.facingRight = false;
-    } else if (cursors.right.isDown) {
+    } else if (isJustRight) {
       body.setVelocityX(onGround ? this.stats.runSpeed : this.stats.airSpeed);
       this.state.facingRight = true;
     }
 
     // Sprung
-    if (Phaser.Input.Keyboard.JustDown(cursors.jump)) {
+    if (jumpPressed) {
       if (onGround) this.jumpsLeft = this.stats.jumpCount;
       if (this.jumpsLeft > 0) {
         body.setVelocityY(this.stats.jumpPower);
@@ -108,24 +259,26 @@ class Fighter {
     }
 
     // Fast Fall
-    if (!onGround && cursors.down.isDown && body.velocity.y > 0)
-      this.state.fastFalling = true;
+    if (!onGround && isDown && body.velocity.y > 0) this.state.fastFalling = true;
     body.setMaxVelocityY(this.state.fastFalling ? this.stats.fastFallSpeed : this.stats.fallSpeed);
-
-    if (onGround) {
-      this.jumpsLeft = this.stats.jumpCount;
-      this.state.fastFalling = false;
-    }
+    if (onGround) { this.jumpsLeft = this.stats.jumpCount; this.state.fastFalling = false; }
 
     // Angriff
-    if (Phaser.Input.Keyboard.JustDown(cursors.attack) && this.attackCooldown <= 0)
-      this._doAttack(cursors.down.isDown, cursors.up.isDown);
+    if (atkPressed && this.attackCooldown <= 0) this._doAttack(isDown, isUp);
+
+    // Special
+    if (spPressed && this.specialCooldown <= 0) this._doSpecial(isDown, isUp);
 
     this.sprite.setAlpha(this.state.facingRight ? 1.0 : 0.82);
-    this._updateLabels();
+    this._updateSprite();
+  }
+
+  _updateSprite() {
+    this.nameText.setPosition(this.sprite.x, this.sprite.y);
   }
 
   _doAttack(down, up) {
+    if (this.state.attacking) return;
     this.state.attacking = true;
     this.attackCooldown  = 400;
 
@@ -134,28 +287,112 @@ class Fighter {
     const oy  = up ? this.sprite.y - 40 : down ? this.sprite.y + 40 : this.sprite.y;
 
     const hb = this.scene.add.rectangle(ox, oy, 60, 50, 0xffff00, 0.35);
-
     this.scene.fighters.forEach(other => {
       if (other === this) return;
-      const b1 = new Phaser.Geom.Rectangle(ox - 30, oy - 25, 60, 50);
-      const b2 = other.sprite.getBounds();
-      if (Phaser.Geom.Intersects.RectangleToRectangle(b1, b2))
-        other.receiveHit(12, dir, up ? -1 : 0);
+      if (Phaser.Geom.Intersects.RectangleToRectangle(
+        new Phaser.Geom.Rectangle(ox-30, oy-25, 60, 50),
+        other.sprite.getBounds()
+      )) other.receiveHit(12, dir, up ? -1 : 0);
     });
-
     this.scene.time.delayedCall(120, () => { hb.destroy(); this.state.attacking = false; });
     this.sprite.setFillStyle(0xffffff);
     this.scene.time.delayedCall(80, () => this.sprite.setFillStyle(this.color));
   }
 
-  receiveHit(baseDamage, dirX, dirY = 0) {
-    this.damage += baseDamage;
-    const kb = ((this.damage * 0.1 + 0.1) * (baseDamage + 5) *
-                (200 / (this.stats.weight + 100)) * 1.4 + 4) * 18;
+  _doSpecial(down, up) {
+    this.specialCooldown = this.specialCooldownMax;
+    const id = this.charData.id;
 
+    if (id === 'allen') {
+      // Blizzard: Schneeflocken-Emitter, Gegner wird kurz verlangsamt/gefroren
+      this._spawnSpecialFX(0x88ccff, 0xaaddff, 20);
+      this.scene.fighters.forEach(other => {
+        if (other === this) return;
+        const dist = Phaser.Math.Distance.Between(this.sprite.x, this.sprite.y, other.sprite.x, other.sprite.y);
+        if (dist < 280) { other.state.frozen = 1800; }
+      });
+    }
+    else if (id === 'bijan') {
+      // Falcon Dive: großer Sprung + Aufprall-Angriff
+      this.sprite.body.setVelocityY(-1100);
+      this._spawnSpecialFX(0xcc0000, 0xff6600, 12);
+      this.scene.time.delayedCall(400, () => {
+        this.sprite.body.setVelocityY(1200);
+        this.scene.time.delayedCall(300, () => {
+          const oy = this.sprite.y;
+          this.scene.fighters.forEach(other => {
+            if (other === this) return;
+            if (Math.abs(other.sprite.y - oy) < 80 && Math.abs(other.sprite.x - this.sprite.x) < 100)
+              other.receiveHit(18, this.state.facingRight ? 1 : -1, -0.5);
+          });
+          this._spawnSpecialFX(0xff8800, 0xffcc00, 18);
+        });
+      });
+    }
+    else if (id === 'pickens') {
+      // Lasso: zieht nächsten Gegner heran
+      this._spawnSpecialFX(0x003594, 0xffffff, 10);
+      const dir = this.state.facingRight ? 1 : -1;
+      this.scene.fighters.forEach(other => {
+        if (other === this) return;
+        const dx = other.sprite.x - this.sprite.x;
+        if (Math.sign(dx) === dir && Math.abs(dx) < 400) {
+          other.sprite.body.setVelocityX(-dx * 3);
+          other.sprite.body.setVelocityY(-200);
+          other.receiveHit(8, -dir, 0);
+        }
+      });
+    }
+    else if (id === 'gibbs') {
+      // Speed Dash: Sonic-Blitz durch alle Gegner
+      const dir = this.state.facingRight ? 1 : -1;
+      this.sprite.body.setVelocityX(dir * 1200);
+      this._spawnSpecialFX(0xffaa00, 0xffff00, 25);
+      const startX = this.sprite.x;
+      // Damage any enemy touched during dash
+      const checkDash = () => {
+        this.scene.fighters.forEach(other => {
+          if (other === this) return;
+          if (Phaser.Geom.Intersects.RectangleToRectangle(
+            this.sprite.getBounds(), other.sprite.getBounds()
+          )) other.receiveHit(10, dir, -0.3);
+        });
+      };
+      for (let t = 0; t < 400; t += 50) {
+        this.scene.time.delayedCall(t, checkDash);
+      }
+    }
+
+    // Flash
+    const origColor = this.color;
+    this.sprite.setFillStyle(0xffffff);
+    this.scene.time.delayedCall(100, () => this.sprite.setFillStyle(origColor));
+    this.scene.cameras.main.shake(120, 0.008);
+  }
+
+  _spawnSpecialFX(col1, col2, count) {
+    for (let i = 0; i < count; i++) {
+      const p = this.scene.add.circle(
+        this.sprite.x + Phaser.Math.Between(-60, 60),
+        this.sprite.y + Phaser.Math.Between(-60, 60),
+        Phaser.Math.Between(4, 12), Phaser.Math.RND.pick([col1, col2]), 0.9
+      );
+      this.scene.tweens.add({
+        targets: p, alpha: 0, scaleX: 2, scaleY: 2,
+        x: p.x + Phaser.Math.Between(-80, 80),
+        y: p.y + Phaser.Math.Between(-80, 80),
+        duration: 600 + Phaser.Math.Between(0, 400),
+        onComplete: () => p.destroy()
+      });
+    }
+  }
+
+  receiveHit(baseDamage, dirX, dirY = 0) {
+    if (this.state.frozen > 0) { this.state.frozen = 0; return; } // break freeze = no damage
+    this.damage += baseDamage;
+    const kb = ((this.damage * 0.1 + 0.1) * (baseDamage + 5) * (200 / (this.stats.weight + 100)) * 1.4 + 4) * 18;
     this.sprite.body.setVelocity(dirX * kb, dirY !== 0 ? dirY * kb * 0.8 : -kb * 0.6);
     this.state.hitstun = Math.min(kb * 1.2, 600);
-
     this.sprite.setFillStyle(0xff0000);
     this.scene.time.delayedCall(150, () => this.sprite.setFillStyle(this.color));
     this.scene.cameras.main.shake(80, 0.006);
@@ -165,138 +402,181 @@ class Fighter {
     this.stocks--;
     this.damage = 0;
     this.scene.events.emit('stockLost', this.playerIndex, this.stocks);
-
     if (this.stocks <= 0) {
       this.scene.events.emit('playerOut', this.playerIndex);
       this.sprite.setVisible(false);
-      this.label.setVisible(false);
-      this.damageLabel.setVisible(false);
+      this.nameText.setVisible(false);
       return;
     }
-
     const spawnX = this.playerIndex === 0 ? 320 : 960;
     this.sprite.setPosition(spawnX, 200);
     this.sprite.body.setVelocity(0, 0);
     this.state.hitstun = 0;
+    this.state.frozen  = 0;
     this.sprite.setAlpha(0.5);
-    this.scene.time.delayedCall(1500, () => this.sprite.setAlpha(1.0));
-  }
-
-  _updateLabels() {
-    this.label.setPosition(this.sprite.x, this.sprite.y - 42);
-    this.damageLabel.setPosition(this.sprite.x, this.sprite.y - 58);
-    this.damageLabel.setText(`${Math.floor(this.damage)}%`);
-    const p = Math.min(this.damage / 150, 1);
-    this.damageLabel.setColor(`rgb(${Math.floor(p*255)},${Math.floor((1-p)*200)},50)`);
+    this.scene.time.delayedCall(1500, () => { if (this.sprite) this.sprite.setAlpha(1.0); });
   }
 
   isOutOfBounds(W, H) {
-    return this.sprite.x < -200 || this.sprite.x > W + 200 ||
-           this.sprite.y < -300 || this.sprite.y > H + 100;
+    return this.sprite.x < -200 || this.sprite.x > W + 200 || this.sprite.y < -300 || this.sprite.y > H + 100;
   }
 
-  destroy() {
-    this.sprite.destroy();
-    this.label.destroy();
-    this.damageLabel.destroy();
-  }
+  destroy() { this.sprite.destroy(); this.nameText.destroy(); }
 }
 
 // ============================================================
-//  MenuScene
+//  CharSelectScene
 // ============================================================
-class MenuScene extends Phaser.Scene {
-  constructor() { super({ key: 'MenuScene' }); }
-
-  init(data) { this.winner = data?.winner || null; }
+class CharSelectScene extends Phaser.Scene {
+  constructor() { super({ key: 'CharSelectScene' }); }
 
   create() {
     const W = this.scale.width;
     const H = this.scale.height;
 
+    // BG
     const bg = this.add.graphics();
-    bg.fillGradientStyle(0x050510, 0x050510, 0x0d1a2e, 0x0d1a2e, 1);
+    bg.fillGradientStyle(0x050514, 0x050514, 0x0a1a35, 0x0a1a35, 1);
     bg.fillRect(0, 0, W, H);
 
-    for (let i = 0; i < 80; i++) {
-      this.add.circle(
-        Phaser.Math.Between(0, W), Phaser.Math.Between(0, H),
-        Phaser.Math.FloatBetween(0.5, 2.5), 0xffffff,
-        Phaser.Math.FloatBetween(0.2, 0.8)
-      );
-    }
+    // Stars
+    for (let i = 0; i < 60; i++)
+      this.add.circle(Phaser.Math.Between(0,W), Phaser.Math.Between(0,H), Phaser.Math.FloatBetween(0.5,2), 0xffffff, Phaser.Math.FloatBetween(0.2,0.7));
 
-    this.add.text(W/2, H*0.15, '🏈', { fontSize: '64px' }).setOrigin(0.5);
-
-    this.add.text(W/2, H*0.30, 'FOOTBALL', {
-      fontSize: '72px', fontFamily: 'Arial Black',
-      color: '#ffcc00', stroke: '#aa6600', strokeThickness: 8
+    this.add.text(W/2, 30, 'FOOTBALL LEAGUE OF LEGENDS', {
+      fontSize: '22px', fontFamily: 'Arial Black', color: '#ffcc00', stroke: '#000', strokeThickness: 4
     }).setOrigin(0.5);
 
-    this.add.text(W/2, H*0.44, 'LEAGUE OF LEGENDS', {
-      fontSize: '32px', fontFamily: 'Arial Black',
-      color: '#ffffff', stroke: '#003366', strokeThickness: 5
+    this.add.text(W/2, 65, 'CHARAKTER WÄHLEN', {
+      fontSize: '16px', fontFamily: 'Arial Black', color: '#aaccff', stroke: '#000', strokeThickness: 3
     }).setOrigin(0.5);
 
-    this.add.text(W/2, H*0.53, '★  ★  ★  ★  ★', {
-      fontSize: '20px', color: '#ffaa00'
-    }).setOrigin(0.5);
+    // P1 selected index
+    this.p1Selected = 0;
+    this.selectionConfirmed = false;
 
-    if (this.winner) {
-      const isDraw = this.winner === 'Unentschieden';
-      this.add.text(W/2, H*0.63,
-        isDraw ? '🤝 UNENTSCHIEDEN!' : `🏆 ${this.winner} GEWINNT!`, {
-        fontSize: '36px', fontFamily: 'Arial Black',
-        color: isDraw ? '#aaaaff' : '#ffdd00',
-        stroke: '#000000', strokeThickness: 5
+    // Draw character cards
+    this.cards = [];
+    const cardW = 260, cardH = 320;
+    const totalW = CHARACTERS.length * (cardW + 20) - 20;
+    const startX = (W - totalW) / 2 + cardW / 2;
+
+    CHARACTERS.forEach((char, i) => {
+      const cx = startX + i * (cardW + 20);
+      const cy = H / 2 + 20;
+
+      // Card BG
+      const card = this.add.graphics();
+      const drawCard = (selected) => {
+        card.clear();
+        card.fillStyle(selected ? 0x1a3a6a : 0x0d1a2e, 1);
+        card.fillRoundedRect(cx - cardW/2, cy - cardH/2, cardW, cardH, 14);
+        card.lineStyle(selected ? 4 : 2, selected ? 0x44aaff : 0x334466, 1);
+        card.strokeRoundedRect(cx - cardW/2, cy - cardH/2, cardW, cardH, 14);
+      };
+      drawCard(i === 0);
+
+      // Character emoji big
+      this.add.text(cx, cy - 90, char.emoji, { fontSize: '72px' }).setOrigin(0.5);
+
+      // Color band
+      const band = this.add.graphics();
+      band.fillStyle(char.color, 0.7);
+      band.fillRoundedRect(cx - cardW/2 + 10, cy - cardH/2 + 10, cardW - 20, 8, 4);
+
+      // Number badge
+      const badge = this.add.graphics();
+      badge.fillStyle(char.color, 1);
+      badge.fillCircle(cx + cardW/2 - 28, cy - cardH/2 + 28, 22);
+      this.add.text(cx + cardW/2 - 28, cy - cardH/2 + 28, char.number, {
+        fontSize: '16px', fontFamily: 'Arial Black', color: '#fff'
       }).setOrigin(0.5);
-    }
 
-    const btnY = this.winner ? H*0.80 : H*0.68;
-    const btnBg = this.add.graphics();
-    const drawBtn = (col, border) => {
-      btnBg.clear();
-      btnBg.fillStyle(col, 1);
-      btnBg.fillRoundedRect(W/2-160, btnY-28, 320, 56, 12);
-      btnBg.lineStyle(2, border, 0.9);
-      btnBg.strokeRoundedRect(W/2-160, btnY-28, 320, 56, 12);
-    };
-    drawBtn(0x1a5fa0, 0x44aaff);
+      // Name & desc
+      this.add.text(cx, cy + 10, char.name, {
+        fontSize: '17px', fontFamily: 'Arial Black', color: '#ffffff', stroke: '#000', strokeThickness: 3,
+        wordWrap: { width: cardW - 20 }, align: 'center'
+      }).setOrigin(0.5);
 
-    this.add.text(W/2, btnY, this.winner ? '▶  NOCHMAL SPIELEN' : '▶  SPIEL STARTEN', {
-      fontSize: '22px', fontFamily: 'Arial Black',
-      color: '#ffffff', stroke: '#000000', strokeThickness: 3
+      this.add.text(cx, cy + 42, char.description, {
+        fontSize: '12px', fontFamily: 'Arial', color: '#aaaaaa'
+      }).setOrigin(0.5);
+
+      this.add.text(cx, cy + 72, `✨ ${char.special}`, {
+        fontSize: '13px', fontFamily: 'Arial Black', color: char.colorHex, stroke: '#000', strokeThickness: 2
+      }).setOrigin(0.5);
+
+      this.add.text(cx, cy + 96, char.specialDesc, {
+        fontSize: '11px', fontFamily: 'Arial', color: '#cccccc',
+        wordWrap: { width: cardW - 20 }, align: 'center'
+      }).setOrigin(0.5);
+
+      // Speed/Weight mini bars
+      const barY = cy + 125;
+      this.add.text(cx - cardW/2 + 14, barY, 'SPD', { fontSize: '10px', color: '#88aacc' });
+      const spdBar = this.add.graphics();
+      spdBar.fillStyle(0x00ff88, 1);
+      const spdPct = (char.stats.runSpeed - 300) / 200;
+      spdBar.fillRoundedRect(cx - cardW/2 + 40, barY + 1, Math.floor(spdPct * (cardW - 80)), 8, 4);
+      spdBar.fillStyle(0x1a3a2a, 1);
+
+      this.add.text(cx - cardW/2 + 14, barY + 18, 'WGT', { fontSize: '10px', color: '#88aacc' });
+      const wgtBar = this.add.graphics();
+      wgtBar.fillStyle(0xff8800, 1);
+      const wgtPct = (char.stats.weight - 80) / 40;
+      wgtBar.fillRoundedRect(cx - cardW/2 + 40, barY + 19, Math.floor(wgtPct * (cardW - 80)), 8, 4);
+
+      // Clickable zone
+      const zone = this.add.zone(cx, cy, cardW, cardH).setInteractive();
+      zone.on('pointerover', () => { drawCard(true); this.input.setDefaultCursor('pointer'); });
+      zone.on('pointerout',  () => { drawCard(i === this.p1Selected); this.input.setDefaultCursor('default'); });
+      zone.on('pointerdown', () => this._selectChar(i));
+
+      this.cards.push({ drawCard, index: i });
+    });
+
+    // VS Computer label
+    this.add.text(W/2, H - 60, '⚔️  VS COMPUTER', {
+      fontSize: '18px', fontFamily: 'Arial Black', color: '#ff6644', stroke: '#000', strokeThickness: 3
     }).setOrigin(0.5);
 
-    const zone = this.add.zone(W/2, btnY, 320, 56).setInteractive();
-    zone.on('pointerover',  () => { drawBtn(0x2a7fd0, 0x88ccff); this.input.setDefaultCursor('pointer'); });
-    zone.on('pointerout',   () => { drawBtn(0x1a5fa0, 0x44aaff); this.input.setDefaultCursor('default'); });
-    zone.on('pointerdown',  () => this.scene.start('GameScene'));
-
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
-    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('GameScene'));
-
-    const press = this.add.text(W/2, btnY+55, 'oder LEERTASTE drücken', {
-      fontSize: '14px', fontFamily: 'Arial', color: '#667788'
+    this.add.text(W/2, H - 32, 'Klick auf Charakter zum Auswählen — dann LEERTASTE oder ENTER zum Starten', {
+      fontSize: '12px', fontFamily: 'Arial', color: '#667788'
     }).setOrigin(0.5);
-    this.tweens.add({ targets: press, alpha: 0.2, duration: 900, yoyo: true, repeat: -1 });
 
-    // Steuerung
-    this.add.text(W/2, H*0.91, '🎮  STEUERUNG', {
-      fontSize: '13px', fontFamily: 'Arial Black', color: '#556677'
-    }).setOrigin(0.5);
-    this.add.text(W*0.3, H*0.91+20,
-      'P1:  A/D = Bewegen  |  W = Springen  |  S = Fast Fall  |  F = Angriff',
-      { fontSize: '11px', fontFamily: 'Arial', color: '#445566' }
-    ).setOrigin(0.5);
-    this.add.text(W*0.3, H*0.91+36,
-      'P2:  ←/→ = Bewegen  |  ↑ = Springen  |  ↓ = Fast Fall  |  L = Angriff',
-      { fontSize: '11px', fontFamily: 'Arial', color: '#445566' }
-    ).setOrigin(0.5);
+    // Keyboard nav
+    this.input.keyboard.on('keydown-LEFT',  () => this._moveSelect(-1));
+    this.input.keyboard.on('keydown-RIGHT', () => this._moveSelect(1));
+    this.input.keyboard.on('keydown-SPACE', () => this._confirm());
+    this.input.keyboard.on('keydown-ENTER', () => this._confirm());
 
-    this.add.text(W-10, H-10, 'v0.1 – Prototyp', {
-      fontSize: '11px', fontFamily: 'Arial', color: '#334455'
-    }).setOrigin(1,1);
+    // AI gets random char (shown top right)
+    this.aiCharIndex = Phaser.Math.Between(0, CHARACTERS.length - 1);
+    this.add.text(W - 20, 30, '🤖 CPU', {
+      fontSize: '16px', fontFamily: 'Arial Black', color: '#ff8866', stroke: '#000', strokeThickness: 3
+    }).setOrigin(1, 0);
+    this.add.text(W - 20, 54, CHARACTERS[this.aiCharIndex].emoji + ' ' + CHARACTERS[this.aiCharIndex].name, {
+      fontSize: '13px', fontFamily: 'Arial', color: '#aaaaaa'
+    }).setOrigin(1, 0);
+  }
+
+  _moveSelect(dir) {
+    this.p1Selected = Phaser.Math.Clamp(this.p1Selected + dir, 0, CHARACTERS.length - 1);
+    this.cards.forEach(c => c.drawCard(c.index === this.p1Selected));
+  }
+
+  _selectChar(i) {
+    this.p1Selected = i;
+    this.cards.forEach(c => c.drawCard(c.index === this.p1Selected));
+  }
+
+  _confirm() {
+    if (this.selectionConfirmed) return;
+    this.selectionConfirmed = true;
+    this.scene.start('GameScene', {
+      p1CharIndex: this.p1Selected,
+      aiCharIndex: this.aiCharIndex
+    });
   }
 }
 
@@ -311,11 +591,12 @@ class HUDScene extends Phaser.Scene {
     const W = this.scale.width;
     const H = this.scale.height;
 
+    // HUD background bar at bottom
     const hud = this.add.graphics();
-    hud.fillStyle(0x000000, 0.65);
-    hud.fillRect(0, H-130, W, 130);
-    hud.lineStyle(1, 0x4488aa, 0.5);
-    hud.lineBetween(0, H-130, W, H-130);
+    hud.fillStyle(0x000000, 0.75);
+    hud.fillRect(0, H - 130, W, 130);
+    hud.lineStyle(2, 0x334455, 1);
+    hud.lineBetween(0, H - 130, W, H - 130);
     hud.lineStyle(1, 0x334455, 0.8);
     hud.lineBetween(W/2, H-130, W/2, H);
 
@@ -323,48 +604,67 @@ class HUDScene extends Phaser.Scene {
       const cx = i === 0 ? W*0.25 : W*0.75;
       const cy = H - 65;
 
+      // Color bar
       const bar = this.add.graphics();
-      bar.fillStyle(f.color, 0.8);
-      bar.fillRect(i===0 ? 0 : W/2, H-130, W/2, 4);
+      bar.fillStyle(f.color, 0.9);
+      bar.fillRect(i===0 ? 0 : W/2, H-132, W/2, 5);
 
-      this.add.text(cx, cy-28, f.name, {
-        fontSize: '20px', fontFamily: 'Arial Black',
+      // Emoji
+      this.add.text(cx - 80, cy - 28, f.charData.emoji, { fontSize: '28px' }).setOrigin(0.5);
+
+      // Name
+      this.add.text(cx, cy - 28, f.charData.name, {
+        fontSize: '17px', fontFamily: 'Arial Black',
         color: '#ffffff', stroke: '#000000', strokeThickness: 4
       }).setOrigin(0.5);
 
-      const dmg = this.add.text(cx, cy+2, '0%', {
-        fontSize: '42px', fontFamily: 'Arial Black',
+      // AI badge
+      if (f.isAI) {
+        this.add.text(cx + 90, cy - 28, '🤖', { fontSize: '16px' }).setOrigin(0.5);
+      }
+
+      // Damage %
+      const dmg = this.add.text(cx, cy + 6, '0%', {
+        fontSize: '44px', fontFamily: 'Arial Black',
         color: '#00ff88', stroke: '#000000', strokeThickness: 5
       }).setOrigin(0.5);
 
+      // Special cooldown label
+      const spLabel = this.add.text(cx, cy - 8, '', {
+        fontSize: '10px', fontFamily: 'Arial', color: '#aaaaaa'
+      }).setOrigin(0.5);
+
+      // Stocks
       const icons = [];
       for (let s = 0; s < 4; s++) {
-        const ic = this.add.circle(cx - 30 + s*22, cy+46, 8, f.color, 1);
-        ic.setStrokeStyle(2, 0xffffff, 0.6);
+        const ic = this.add.circle(cx - 33 + s*22, cy + 50, 8, f.color, 1);
+        ic.setStrokeStyle(2, 0xffffff, 0.5);
         icons.push(ic);
       }
 
-      return { dmg, icons, fighter: f };
+      return { dmg, icons, fighter: f, spLabel };
     });
 
+    // Title
     this.add.text(W/2, 18, 'FOOTBALL LEAGUE OF LEGENDS', {
-      fontSize: '16px', fontFamily: 'Arial Black',
-      color: '#ffcc00', stroke: '#000000', strokeThickness: 3
+      fontSize: '15px', fontFamily: 'Arial Black', color: '#ffcc00', stroke: '#000', strokeThickness: 3
     }).setOrigin(0.5);
 
-    this.add.text(W/2, 50, 'FREE FOR ALL', {
-      fontSize: '13px', fontFamily: 'Arial', color: '#aaaaaa'
-    }).setOrigin(0.5);
-
-    const hint = this.add.text(W/2, H-145, 'P1: WASD + F  |  P2: Pfeiltasten + L', {
+    this.add.text(W/2, 44, 'FREE FOR ALL  —  VS CPU', {
       fontSize: '12px', fontFamily: 'Arial', color: '#888888'
     }).setOrigin(0.5);
-    this.tweens.add({ targets: hint, alpha: 0, delay: 3500, duration: 800 });
+
+    // Controls hint
+    const hint = this.add.text(W/2, H - 145,
+      'P1: WASD=Bewegen | W=Springen | S=FastFall/DurchPlattform | F=Angriff | G=Special',
+      { fontSize: '11px', fontFamily: 'Arial', color: '#667788' }
+    ).setOrigin(0.5);
+    this.tweens.add({ targets: hint, alpha: 0, delay: 4000, duration: 1000 });
   }
 
   update() {
     if (!this.hudElements) return;
-    this.hudElements.forEach(({ dmg, icons, fighter }) => {
+    this.hudElements.forEach(({ dmg, icons, fighter, spLabel }) => {
       const p = Math.floor(fighter.damage);
       dmg.setText(`${p}%`);
       dmg.setColor(p < 50 ? '#00ff88' : p < 100 ? '#ffdd00' : p < 150 ? '#ff8800' : '#ff2244');
@@ -372,6 +672,14 @@ class HUDScene extends Phaser.Scene {
         ic.setFillStyle(s < fighter.stocks ? fighter.color : 0x222222, 1);
         ic.setScale(s < fighter.stocks ? 1 : 0.7);
       });
+      // Special cooldown
+      if (fighter.specialCooldown > 0) {
+        const pct = Math.ceil(fighter.specialCooldown / 1000);
+        spLabel.setText(`✨ Special: ${pct}s`);
+      } else {
+        spLabel.setText('✨ Special: READY!');
+        spLabel.setColor('#ffdd00');
+      }
     });
   }
 }
@@ -382,80 +690,108 @@ class HUDScene extends Phaser.Scene {
 class GameScene extends Phaser.Scene {
   constructor() { super({ key: 'GameScene' }); }
 
+  init(data) {
+    this.p1CharIndex = data.p1CharIndex ?? 0;
+    this.aiCharIndex = data.aiCharIndex ?? 1;
+  }
+
   create() {
     const W = this.scale.width;
     const H = this.scale.height;
     this.fighters = [];
-    this.gameOver = false;
+    this.gameOver  = false;
 
-    // Hintergrund
+    // BG
     const bg = this.add.graphics();
     bg.fillGradientStyle(0x0a0a2e, 0x0a0a2e, 0x1a1a4e, 0x1a1a4e, 1);
     bg.fillRect(0, 0, W, H);
-    for (let i = 0; i < 60; i++) {
-      this.add.circle(
-        Phaser.Math.Between(0, W), Phaser.Math.Between(0, H*0.5),
-        Phaser.Math.FloatBetween(1, 3), 0xffffff, Phaser.Math.FloatBetween(0.3, 0.9)
-      );
-    }
+    for (let i = 0; i < 60; i++)
+      this.add.circle(Phaser.Math.Between(0,W), Phaser.Math.Between(0,H*0.6), Phaser.Math.FloatBetween(1,3), 0xffffff, Phaser.Math.FloatBetween(0.2,0.8));
     const grass = this.add.graphics();
     grass.fillGradientStyle(0x1a5c1a, 0x1a5c1a, 0x0d3d0d, 0x0d3d0d, 1);
-    grass.fillRect(0, H-80, W, 80);
+    grass.fillRect(0, H - 80, W, 80);
 
-    // Blast Zone
+    // Blast zone
     const bz = this.add.graphics();
     bz.lineStyle(1, 0xff3333, 0.2);
-    bz.strokeRect(200, 100, W-400, H-150);
-    this.add.text(W/2, 108, '— BLAST ZONE —', {
-      fontSize: '11px', fontFamily: 'Arial', color: '#ff3333'
-    }).setOrigin(0.5);
+    bz.strokeRect(200, 90, W-400, H-150);
+    this.add.text(W/2, 97, '— BLAST ZONE —', { fontSize:'11px', color:'#ff3333', alpha:0.5 }).setOrigin(0.5);
 
-    // Plattformen
-    this.platforms = this.physics.add.staticGroup();
+    // ---- Platforms ----
+    // Solid (bottom) + passthrough (upper)
+    this.solidPlatforms    = this.physics.add.staticGroup();
+    this.passPlatforms     = this.physics.add.staticGroup();
+
     const gfx = this.add.graphics();
-    const addPlat = (x, y, w, h, col = 0x4a7fa5) => {
-      gfx.fillStyle(col, 1);
+
+    const addSolid = (x, y, w, h) => {
+      gfx.fillStyle(0x4a7fa5, 1);
       gfx.fillRoundedRect(x-w/2, y-h/2, w, h, 6);
-      gfx.lineStyle(2, 0x8899aa, 0.8);
+      gfx.lineStyle(2, 0x8899aa, 0.9);
       gfx.strokeRoundedRect(x-w/2, y-h/2, w, h, 6);
-      const plat = this.add.rectangle(x, y, w, h);
-      this.physics.add.existing(plat, true);
-      this.platforms.add(plat);
+      const p = this.add.rectangle(x, y, w, h);
+      this.physics.add.existing(p, true);
+      this.solidPlatforms.add(p);
+      return p;
     };
-    addPlat(W/2,       H-100, 760, 24, 0x4a7fa5);
-    addPlat(W/2,       H-280, 280, 18, 0x3a6f95);
-    addPlat(W/2 - 240, H-210, 220, 18, 0x3a6f95);
-    addPlat(W/2 + 240, H-210, 220, 18, 0x3a6f95);
 
-    // Kämpfer
-    const p1 = new Fighter(this, 320, 400, 0, {
-      name: 'P1', color: 0x00ddff,
-      stats: { runSpeed: 370, jumpPower: -760, weight: 100 }
-    });
-    const p2 = new Fighter(this, 960, 400, 1, {
-      name: 'P2', color: 0xff4466,
-      stats: { runSpeed: 340, jumpPower: -780, weight: 110 }
-    });
+    const addPass = (x, y, w, h) => {
+      gfx.fillStyle(0x3a6f95, 1);
+      gfx.fillRoundedRect(x-w/2, y-h/2, w, h, 6);
+      gfx.lineStyle(2, 0x7799bb, 0.8);
+      gfx.strokeRoundedRect(x-w/2, y-h/2, w, h, 6);
+      const p = this.add.rectangle(x, y, w, h);
+      this.physics.add.existing(p, true);
+      this.passPlatforms.add(p);
+      p.passY = y - h/2; // top surface Y
+      return p;
+    };
+
+    // Main floor (solid)
+    this.mainFloor = addSolid(W/2, H - 100, 760, 24);
+    // Floating (passthrough)
+    this.floatPlats = [
+      addPass(W/2,       H - 280, 280, 18),
+      addPass(W/2 - 240, H - 210, 220, 18),
+      addPass(W/2 + 240, H - 210, 220, 18),
+    ];
+
+    // ---- Fighters ----
+    const p1 = new Fighter(this, 320, 400, 0, CHARACTERS[this.p1CharIndex], false);
+    const p2 = new Fighter(this, 960, 400, 1, CHARACTERS[this.aiCharIndex], true);
     this.fighters = [p1, p2];
-    this.fighters.forEach(f => this.physics.add.collider(f.sprite, this.platforms));
+    p2.setAITarget(p1);
 
-    // Steuerung
+    // Solid floor collider
+    this.fighters.forEach(f => {
+      this.physics.add.collider(f.sprite, this.solidPlatforms);
+    });
+
+    // Passthrough platform collider (custom process callback)
+    this.fighters.forEach(f => {
+      this.physics.add.collider(f.sprite, this.passPlatforms, null, (sprite, plat) => {
+        // Only collide if falling down AND sprite bottom is near platform top
+        const body = sprite.body;
+        const platTop = plat.y - plat.height / 2;
+        const spriteBottom = sprite.y + sprite.height / 2;
+        const falling = body.velocity.y > 0;
+        // Drop-through if S/down held
+        const dropping = f.state && f.state.fastFalling;
+        if (dropping) return false;
+        return falling && (spriteBottom - platTop) < 16;
+      });
+    });
+
+    // ---- Controls ----
     const kb = this.input.keyboard;
     this.p1Controls = {
-      left:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-      right:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.D),
-      up:     kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-      down:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-      jump:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-      attack: kb.addKey(Phaser.Input.Keyboard.KeyCodes.F),
-    };
-    this.p2Controls = {
-      left:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
-      right:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
-      up:     kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-      down:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
-      jump:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-      attack: kb.addKey(Phaser.Input.Keyboard.KeyCodes.L),
+      left:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+      right:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+      up:      kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      down:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+      jump:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      attack:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.F),
+      special: kb.addKey(Phaser.Input.Keyboard.KeyCodes.G),
     };
 
     this.scene.launch('HUDScene', { fighters: this.fighters });
@@ -466,7 +802,7 @@ class GameScene extends Phaser.Scene {
     if (this.gameOver) return;
     const W = this.scale.width, H = this.scale.height;
     if (this.fighters[0]?.stocks > 0) this.fighters[0].update(this.p1Controls, delta);
-    if (this.fighters[1]?.stocks > 0) this.fighters[1].update(this.p2Controls, delta);
+    if (this.fighters[1]?.stocks > 0) this.fighters[1].update(null, delta);
     this.fighters.forEach(f => { if (f.stocks > 0 && f.isOutOfBounds(W, H)) f.loseStock(); });
   }
 
@@ -474,17 +810,80 @@ class GameScene extends Phaser.Scene {
     const alive = this.fighters.filter(f => f.stocks > 0);
     if (alive.length <= 1) {
       this.gameOver = true;
-      const winner = alive.length === 1 ? alive[0].name : 'Unentschieden';
+      const winner = alive.length === 1 ? alive[0].charData.name : 'Unentschieden';
+      const winnerIsPlayer = alive.length === 1 && !alive[0].isAI;
       this.time.delayedCall(600, () => {
         this.scene.stop('HUDScene');
-        this.scene.start('MenuScene', { winner });
+        this.scene.start('MenuScene', { winner, winnerIsPlayer });
       });
     }
   }
 }
 
 // ============================================================
-//  Phaser starten
+//  MenuScene
+// ============================================================
+class MenuScene extends Phaser.Scene {
+  constructor() { super({ key: 'MenuScene' }); }
+  init(data) { this.winner = data?.winner || null; this.winnerIsPlayer = data?.winnerIsPlayer; }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(0x050510, 0x050510, 0x0d1a2e, 0x0d1a2e, 1);
+    bg.fillRect(0, 0, W, H);
+    for (let i=0;i<80;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.FloatBetween(0.5,2.5),0xffffff,Phaser.Math.FloatBetween(0.2,0.8));
+
+    this.add.text(W/2, H*0.14, '🏈', { fontSize: '64px' }).setOrigin(0.5);
+    this.add.text(W/2, H*0.28, 'FOOTBALL', {
+      fontSize: '72px', fontFamily: 'Arial Black', color: '#ffcc00', stroke: '#aa6600', strokeThickness: 8
+    }).setOrigin(0.5);
+    this.add.text(W/2, H*0.42, 'LEAGUE OF LEGENDS', {
+      fontSize: '32px', fontFamily: 'Arial Black', color: '#ffffff', stroke: '#003366', strokeThickness: 5
+    }).setOrigin(0.5);
+    this.add.text(W/2, H*0.51, '★  ★  ★  ★  ★', { fontSize: '20px', color: '#ffaa00' }).setOrigin(0.5);
+
+    if (this.winner) {
+      const msg = this.winnerIsPlayer ? `🏆 ${this.winner} GEWINNT!` : this.winner === 'Unentschieden' ? '🤝 UNENTSCHIEDEN!' : `🤖 CPU GEWINNT! (${this.winner})`;
+      const col = this.winnerIsPlayer ? '#ffdd00' : this.winner === 'Unentschieden' ? '#aaaaff' : '#ff6644';
+      this.add.text(W/2, H*0.62, msg, {
+        fontSize: '34px', fontFamily: 'Arial Black', color: col, stroke: '#000', strokeThickness: 5
+      }).setOrigin(0.5);
+    }
+
+    const btnY = this.winner ? H*0.79 : H*0.66;
+    const btnBg = this.add.graphics();
+    const drawBtn = (col, border) => {
+      btnBg.clear();
+      btnBg.fillStyle(col,1); btnBg.fillRoundedRect(W/2-170, btnY-30, 340, 58, 12);
+      btnBg.lineStyle(2, border, 0.9); btnBg.strokeRoundedRect(W/2-170, btnY-30, 340, 58, 12);
+    };
+    drawBtn(0x1a5fa0, 0x44aaff);
+    this.add.text(W/2, btnY, this.winner ? '▶  CHARAKTER WÄHLEN' : '▶  CHARAKTER WÄHLEN', {
+      fontSize: '22px', fontFamily: 'Arial Black', color: '#fff', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5);
+    const zone = this.add.zone(W/2, btnY, 340, 58).setInteractive();
+    zone.on('pointerover',  () => { drawBtn(0x2a7fd0, 0x88ccff); this.input.setDefaultCursor('pointer'); });
+    zone.on('pointerout',   () => { drawBtn(0x1a5fa0, 0x44aaff); this.input.setDefaultCursor('default'); });
+    zone.on('pointerdown',  () => this.scene.start('CharSelectScene'));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('CharSelectScene'));
+    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('CharSelectScene'));
+
+    const press = this.add.text(W/2, btnY+52, 'oder LEERTASTE drücken', {
+      fontSize:'13px', fontFamily:'Arial', color:'#667788'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: press, alpha: 0.2, duration: 900, yoyo: true, repeat: -1 });
+
+    this.add.text(W/2, H*0.91, '🎮  P1: WASD + F (Angriff) + G (Special)  |  Gegen CPU', {
+      fontSize:'13px', fontFamily:'Arial Black', color:'#556677'
+    }).setOrigin(0.5);
+    this.add.text(W-10, H-10, 'v0.2', { fontSize:'11px', color:'#334455' }).setOrigin(1,1);
+  }
+}
+
+// ============================================================
+//  START
 // ============================================================
 new Phaser.Game({
   type: Phaser.AUTO,
@@ -492,13 +891,9 @@ new Phaser.Game({
   height: 720,
   parent: 'game-container',
   backgroundColor: '#1a1a2e',
-  physics: {
-    default: 'arcade',
-    arcade: { gravity: { y: 1800 }, debug: false }
-  },
-  scene: [MenuScene, GameScene, HUDScene]
+  physics: { default: 'arcade', arcade: { gravity: { y: 1800 }, debug: false } },
+  scene: [MenuScene, CharSelectScene, GameScene, HUDScene]
 });
-
 </script>
 </body>
 </html>
