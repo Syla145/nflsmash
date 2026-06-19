@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>Football League of Legends</title>
+  <title>NFL Smash Bros</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0f; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
@@ -286,8 +286,10 @@ class Fighter {
     this.stocks    = 4;
     this.damage    = 0;
     this.jumpsLeft = this.stats.jumpCount;
-    this.specialCooldownMax = charData.specialCooldown || 6000;
-    this.specialCooldown    = 0;
+    this.specialCooldownMax = 30000; // 30 Sekunden zum Aufladen
+    this.specialCharge      = 0;    // Lädt sich auf (0 → 30000)
+    this.attackCooldown     = 0;
+    this.rangedCooldown     = 0;
 
     this.state = {
       attacking: false, hitstun: 0, fastFalling: false,
@@ -306,7 +308,6 @@ class Fighter {
     // Pixel-Art Grafik-Container (wird jeden Frame neu gezeichnet)
     this.gfx = null;
 
-    this.attackCooldown = 0;
     this.ai = isAI ? new AIController() : null;
   }
 
@@ -338,17 +339,22 @@ class Fighter {
       return;
     }
 
-    if (this.attackCooldown  > 0) this.attackCooldown  -= delta;
-    if (this.specialCooldown > 0) this.specialCooldown -= delta;
+    if (this.attackCooldown   > 0) this.attackCooldown   -= delta;
+    if (this.rangedCooldown   > 0) this.rangedCooldown   -= delta;
+    // Special lädt sich auf – zählt HOCH bis max (30000ms)
+    if (this.specialCharge < this.specialCooldownMax) {
+      this.specialCharge = Math.min(this.specialCharge + delta, this.specialCooldownMax);
+    }
 
     // Input lesen
-    const goLeft     = this.isAI ? cursors.left    : cursors.left.isDown;
-    const goRight    = this.isAI ? cursors.right   : cursors.right.isDown;
-    const goDown     = this.isAI ? cursors.down    : cursors.down.isDown;
-    const goUp       = this.isAI ? cursors.up      : cursors.up.isDown;
-    const jumpJD     = this.isAI ? cursors.jump    : Phaser.Input.Keyboard.JustDown(cursors.jump);
-    const atkJD      = this.isAI ? cursors.attack  : Phaser.Input.Keyboard.JustDown(cursors.attack);
-    const spJD       = this.isAI ? cursors.special : (cursors.special && Phaser.Input.Keyboard.JustDown(cursors.special));
+    const goLeft   = this.isAI ? cursors.left    : cursors.left.isDown;
+    const goRight  = this.isAI ? cursors.right   : cursors.right.isDown;
+    const goDown   = this.isAI ? cursors.down    : cursors.down.isDown;
+    const goUp     = this.isAI ? cursors.up      : cursors.up.isDown;
+    const jumpJD   = this.isAI ? cursors.jump    : Phaser.Input.Keyboard.JustDown(cursors.jump);
+    const atkJD    = this.isAI ? cursors.attack  : Phaser.Input.Keyboard.JustDown(cursors.attack);
+    const rngJD    = this.isAI ? cursors.ranged  : (cursors.ranged && Phaser.Input.Keyboard.JustDown(cursors.ranged));
+    const spJD     = this.isAI ? cursors.special : (cursors.special && Phaser.Input.Keyboard.JustDown(cursors.special));
 
     // Bewegung (Friction-basiert wie mario-mimic)
     if (goLeft) {
@@ -361,7 +367,7 @@ class Fighter {
       this.state.facingRight = true;
     }
 
-    // Sprung
+    // Sprung mit W
     if (jumpJD) {
       if (onGround) this.jumpsLeft = this.stats.jumpCount;
       if (this.jumpsLeft > 0) {
@@ -371,14 +377,15 @@ class Fighter {
       }
     }
 
-    // Fast Fall / Durchfall
+    // S = nur Fast Fall in der Luft (KEIN Durchfallen durch Plattformen)
     if (!onGround && goDown && body.velocity.y > 0) this.state.fastFalling = true;
     body.setMaxVelocityY(this.state.fastFalling ? this.stats.fastFallSpeed : this.stats.fallSpeed);
     if (onGround) { this.jumpsLeft = this.stats.jumpCount; this.state.fastFalling = false; }
 
-    // Angriff
-    if (atkJD && this.attackCooldown <= 0) this._doAttack(goDown, goUp);
-    if (spJD  && this.specialCooldown <= 0) this._doSpecial(goDown, goUp);
+    // J = Nahkampf, K = Fernattacke, L = Special
+    if (atkJD && this.attackCooldown <= 0)                          this._doAttack(goDown, goUp);
+    if (rngJD && this.rangedCooldown <= 0)                          this._doRanged(goDown, goUp);
+    if (spJD  && this.specialCharge >= this.specialCooldownMax)     this._doSpecial(goDown, goUp);
 
     this._redraw();
   }
@@ -418,12 +425,75 @@ class Fighter {
     this.scene.time.delayedCall(130, () => { this.state.attacking = false; });
   }
 
+  // K = Fernattacke: jeder Char hat einen einzigartigen Projektil-Stil
+  _doRanged(down, up) {
+    this.rangedCooldown = 1200;
+    const dir = this.state.facingRight ? 1 : -1;
+    const id  = this.charData.id;
+    const sx  = this.sprite.x + dir * 30;
+    const sy  = this.sprite.y;
+
+    // Projektil als Circle + Tween
+    let projColor = this.color;
+    let projSize  = 10;
+    let projSpeed = dir * 700;
+    let projDmg   = 7;
+
+    if (id === 'allen')   { projColor = 0x88ccff; projSize = 14; projDmg = 8; }  // Snowball
+    if (id === 'bijan')   { projColor = 0xff4400; projSize = 10; projDmg = 7; }  // Falcon feather
+    if (id === 'pickens') { projColor = 0xcc8833; projSize = 8;  projDmg = 6; projSpeed *= 1.3; } // Lasso shot
+    if (id === 'gibbs')   { projColor = 0xffdd00; projSize = 12; projDmg = 9; projSpeed *= 1.5; } // Lightning bolt
+
+    const proj = this.scene.add.circle(sx, sy, projSize, projColor, 1);
+    proj.setDepth(18);
+    // Glow-Effekt
+    const glow = this.scene.add.circle(sx, sy, projSize + 4, projColor, 0.3);
+    glow.setDepth(17);
+
+    // Projektil bewegt sich
+    const startX = sx;
+    const maxRange = 550;
+    const speed = projSpeed;
+    let hit = false;
+
+    const ticker = this.scene.time.addEvent({
+      delay: 16,
+      repeat: 60,
+      callback: () => {
+        if (hit || !proj.active) { ticker.remove(); return; }
+        proj.x += speed * 0.016;
+        glow.x = proj.x; glow.y = proj.y;
+
+        // Treffer prüfen
+        this.scene.fighters.forEach(other => {
+          if (other === this || hit) return;
+          const b = other.sprite.getBounds();
+          if (Phaser.Geom.Intersects.CircleToRectangle(
+            new Phaser.Geom.Circle(proj.x, proj.y, projSize), b
+          )) {
+            hit = true;
+            other.receiveHit(projDmg, dir, 0);
+            SpriteRenderer.spawnFX(this.scene, proj.x, proj.y, projColor, 0xffffff, 8);
+            proj.destroy(); glow.destroy();
+          }
+        });
+
+        // Range-Limit
+        if (Math.abs(proj.x - startX) > maxRange) {
+          proj.destroy(); glow.destroy();
+        }
+      }
+    });
+  }
+
   _doSpecial(down, up) {
-    this.specialCooldown = this.specialCooldownMax;
+    this.specialCharge = 0; // Verbrauch → lädt sich neu auf
     const id  = this.charData.id;
     const dir = this.state.facingRight ? 1 : -1;
 
-    this.scene.cameras.main.shake(120, 0.008);
+    this.scene.cameras.main.shake(180, 0.012);
+    // Großes Auflade-Flash
+    SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0xffffff, this.color, 30);
 
     if (id === 'allen') {
       SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0x88ccff, 0xffffff, 24);
@@ -450,13 +520,11 @@ class Fighter {
     }
     else if (id === 'pickens') {
       SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0x003594, 0xffffff, 10);
-      // Lasso-Linie zeichnen
       const line = this.scene.add.graphics();
       line.setDepth(15);
       line.lineStyle(3, 0xcc8833, 0.9);
       line.lineBetween(this.sprite.x, this.sprite.y, this.sprite.x + dir*380, this.sprite.y);
       this.scene.tweens.add({ targets: line, alpha: 0, duration: 400, onComplete: () => line.destroy() });
-
       this.scene.fighters.forEach(other => {
         if (other === this) return;
         const dx = other.sprite.x - this.sprite.x;
@@ -470,7 +538,6 @@ class Fighter {
     else if (id === 'gibbs') {
       SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0xffaa00, 0xffff00, 28);
       this.sprite.body.setVelocityX(dir * 1200);
-      // Speed-Lines
       for (let i = 0; i < 5; i++) {
         this.scene.time.delayedCall(i * 60, () => {
           SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0xffdd00, 0xffffff, 4);
@@ -539,7 +606,7 @@ class CharSelectScene extends Phaser.Scene {
     bg.fillRect(0, 0, W, H);
     for (let i=0;i<60;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.FloatBetween(0.5,2),0xffffff,Phaser.Math.FloatBetween(0.2,0.7));
 
-    this.add.text(W/2, 28, 'FOOTBALL LEAGUE OF LEGENDS', {
+    this.add.text(W/2, 28, 'NFL SMASH BROS', {
       fontSize:'22px', fontFamily:'Arial Black', color:'#ffcc00', stroke:'#000', strokeThickness:4
     }).setOrigin(0.5);
     this.add.text(W/2, 62, 'CHARAKTER WÄHLEN', {
@@ -676,9 +743,16 @@ class HUDScene extends Phaser.Scene {
         fontSize:'44px', fontFamily:'Arial Black', color:'#00ff88', stroke:'#000', strokeThickness:5
       }).setOrigin(0.5);
 
-      const spLabel = this.add.text(cx, cy-12, '', {
-        fontSize:'10px', fontFamily:'Arial', color:'#aaaaaa'
+      const spLabel = this.add.text(cx, cy-28, '✨ SPECIAL', {
+        fontSize:'10px', fontFamily:'Arial Black', color:'#ffdd00'
       }).setOrigin(0.5);
+
+      // Ladebalken Hintergrund
+      const barBg = this.add.graphics();
+      barBg.fillStyle(0x222222, 0.9);
+      barBg.fillRoundedRect(cx-70, cy-18, 140, 10, 5);
+      // Ladebalken Fill (wird im update neu gezeichnet)
+      const barFill = this.add.graphics();
 
       const icons = [];
       for (let s=0;s<4;s++) {
@@ -686,33 +760,43 @@ class HUDScene extends Phaser.Scene {
         ic.setStrokeStyle(2, 0xffffff, 0.5);
         icons.push(ic);
       }
-      return { dmg, icons, fighter: f, spLabel };
+      return { dmg, icons, fighter: f, spLabel, barFill, cx, cy };
     });
 
-    this.add.text(W/2, 18, 'FOOTBALL LEAGUE OF LEGENDS', {
-      fontSize:'15px', fontFamily:'Arial Black', color:'#ffcc00', stroke:'#000', strokeThickness:3
+    this.add.text(W/2, 18, 'NFL SMASH BROS', {
+      fontSize:'18px', fontFamily:'Arial Black', color:'#ffcc00', stroke:'#000', strokeThickness:3
     }).setOrigin(0.5);
-    this.add.text(W/2, 42, 'FREE FOR ALL  —  VS CPU', {
+    this.add.text(W/2, 44, 'FREE FOR ALL  —  VS CPU', {
       fontSize:'12px', fontFamily:'Arial', color:'#888888'
     }).setOrigin(0.5);
 
     const hint = this.add.text(W/2, H-145,
-      'WASD=Bewegen | W=Springen | S=Durchfall | F=Angriff | G=Special',
+      'WASD=Bewegen | W=Springen | S=Fast Fall | J=Nah | K=Fern | L=Special (30s Aufladen)',
       {fontSize:'11px', fontFamily:'Arial', color:'#667788'}
     ).setOrigin(0.5);
-    this.tweens.add({targets:hint, alpha:0, delay:4500, duration:1000});
+    this.tweens.add({targets:hint, alpha:0, delay:5000, duration:1000});
   }
 
   update() {
     if (!this.hudElements) return;
-    this.hudElements.forEach(({dmg, icons, fighter, spLabel}) => {
+    this.hudElements.forEach(({dmg, icons, fighter, spLabel, barFill, cx, cy}) => {
       const p = Math.floor(fighter.damage);
       dmg.setText(`${p}%`);
       dmg.setColor(p<50?'#00ff88':p<100?'#ffdd00':p<150?'#ff8800':'#ff2244');
       icons.forEach((ic,s) => { ic.setFillStyle(s<fighter.stocks?fighter.color:0x222222,1); ic.setScale(s<fighter.stocks?1:0.7); });
-      const cd = fighter.specialCooldown;
-      spLabel.setText(cd>0 ? `✨ ${Math.ceil(cd/1000)}s` : '✨ READY!');
-      spLabel.setColor(cd>0 ? '#888888' : '#ffdd00');
+
+      // Ladebalken aktualisieren
+      const charge    = fighter.specialCharge || 0;
+      const maxCharge = fighter.specialCooldownMax || 30000;
+      const pct       = Math.min(charge / maxCharge, 1);
+      const ready     = pct >= 1;
+
+      barFill.clear();
+      barFill.fillStyle(ready ? 0xffdd00 : 0x4488ff, 1);
+      if (pct > 0) barFill.fillRoundedRect(cx-70, cy-18, Math.floor(140*pct), 10, 5);
+
+      spLabel.setText(ready ? '⚡ SPECIAL READY!' : `✨ ${Math.floor(pct*100)}%`);
+      spLabel.setColor(ready ? '#ffdd00' : '#aaaaaa');
     });
   }
 }
@@ -762,7 +846,7 @@ class GameScene extends Phaser.Scene {
       this.passPlatforms.add(p); return p;
     };
 
-    addSolid(W/2, H-100, 760, 24);
+    addSolid(W/2, H-100, 900, 24);
     addPass(W/2,       H-280, 280, 18);
     addPass(W/2 - 240, H-210, 220, 18);
     addPass(W/2 + 240, H-210, 220, 18);
@@ -780,7 +864,7 @@ class GameScene extends Phaser.Scene {
         const platTop  = plat.y - plat.height/2;
         const sprBot   = sprite.y + sprite.height/2;
         const falling  = body.velocity.y > 0;
-        const dropping = f.state.fastFalling;
+        const dropping = false; // S fällt NICHT durch Plattformen
         if (dropping) return false;
         return falling && (sprBot - platTop) < 18;
       });
@@ -794,8 +878,9 @@ class GameScene extends Phaser.Scene {
       up:      kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
       down:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       jump:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-      attack:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.F),
-      special: kb.addKey(Phaser.Input.Keyboard.KeyCodes.G),
+      attack:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.J),
+      ranged:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.K),
+      special: kb.addKey(Phaser.Input.Keyboard.KeyCodes.L),
     };
 
     this.scene.launch('HUDScene', { fighters: this.fighters });
@@ -837,8 +922,8 @@ class MenuScene extends Phaser.Scene {
     for(let i=0;i<80;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.FloatBetween(0.5,2.5),0xffffff,Phaser.Math.FloatBetween(0.2,0.8));
 
     this.add.text(W/2,H*0.14,'🏈',{fontSize:'64px'}).setOrigin(0.5);
-    this.add.text(W/2,H*0.28,'FOOTBALL',{fontSize:'72px',fontFamily:'Arial Black',color:'#ffcc00',stroke:'#aa6600',strokeThickness:8}).setOrigin(0.5);
-    this.add.text(W/2,H*0.42,'LEAGUE OF LEGENDS',{fontSize:'32px',fontFamily:'Arial Black',color:'#ffffff',stroke:'#003366',strokeThickness:5}).setOrigin(0.5);
+    this.add.text(W/2,H*0.28,'NFL SMASH',{fontSize:'60px',fontFamily:'Arial Black',color:'#ffcc00',stroke:'#aa6600',strokeThickness:8}).setOrigin(0.5);
+    this.add.text(W/2,H*0.42,'BROS',{fontSize:'32px',fontFamily:'Arial Black',color:'#ffffff',stroke:'#003366',strokeThickness:5}).setOrigin(0.5);
     this.add.text(W/2,H*0.51,'★  ★  ★  ★  ★',{fontSize:'20px',color:'#ffaa00'}).setOrigin(0.5);
 
     if(this.winner){
@@ -862,8 +947,8 @@ class MenuScene extends Phaser.Scene {
     const press=this.add.text(W/2,btnY+52,'oder LEERTASTE drücken',{fontSize:'13px',fontFamily:'Arial',color:'#667788'}).setOrigin(0.5);
     this.tweens.add({targets:press,alpha:0.2,duration:900,yoyo:true,repeat:-1});
 
-    this.add.text(W/2,H*0.91,'🎮  WASD + F (Angriff) + G (Special)  |  ← → Pfeiltasten im Charselect',{fontSize:'12px',fontFamily:'Arial Black',color:'#556677'}).setOrigin(0.5);
-    this.add.text(W-10,H-10,'v0.3',{fontSize:'11px',color:'#334455'}).setOrigin(1,1);
+    this.add.text(W/2,H*0.91,'🎮  WASD=Bewegen | W=Springen | S=Fast Fall | J=Nahkampf | K=Fernattacke | L=Special (30s)',{fontSize:'12px',fontFamily:'Arial Black',color:'#556677'}).setOrigin(0.5);
+    this.add.text(W-10,H-10,'v0.4',{fontSize:'11px',color:'#334455'}).setOrigin(1,1);
   }
 }
 
