@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>Football League of Legends</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0f; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
+    canvas { display: block; border: 2px solid #222; }
+  </style>
+</head>
+<body>
+<div id="game-container"></div>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script>
+
+// ============================================================
+//  CHARAKTER-DEFINITIONEN
+// ============================================================
+const CHARACTERS = [
+  {
+    id: 'allen',
+    name: 'Josh Allen',
+    nickname: 'THE BLIZZARD',
+    number: '17',
+    color: 0x0077cc,
+    colorHex: '#0077cc',
+    helmetColor: '#0055aa',
+    jerseyColor: '#0077cc',
+    pantsColor: '#002244',
+    emoji: '❄️',
+    description: 'QB | Buffalo Bills',
+    special: 'Blizzard Storm',
+    specialDesc: 'Schnee-Sturm verlangsamt Gegner',
+    stats: { runSpeed: 340, jumpPower: -780, weight: 115, airSpeed: 190 },
+    specialCooldown: 6000,
+  },
+  {
+    id: 'bijan',
+    name: 'Bijan Robinson',
+    nickname: 'THE FALCON',
+    number: '7',
+    color: 0xcc0000,
+    colorHex: '#cc0000',
+    helmetColor: '#aa0000',
+    jerseyColor: '#cc0000',
+    pantsColor: '#1a1a1a',
+    emoji: '🦅',
+    description: 'RB | Atlanta Falcons',
+    special: 'Falcon Dive',
+    specialDesc: 'Sturzflug-Angriff von oben',
+    stats: { runSpeed: 420, jumpPower: -820, weight: 95, airSpeed: 240 },
+    specialCooldown: 5000,
+  },
+  {
+    id: 'pickens',
+    name: 'George Pickens',
+    nickname: 'THE COWBOY',
+    number: '14',
+    color: 0x003594,
+    colorHex: '#003594',
+    helmetColor: '#002277',
+    jerseyColor: '#003594',
+    pantsColor: '#c0c0c0',
+    emoji: '🤠',
+    description: 'WR | Dallas Cowboys',
+    special: 'Lasso Throw',
+    specialDesc: 'Lasso zieht Gegner heran',
+    stats: { runSpeed: 380, jumpPower: -800, weight: 90, airSpeed: 230 },
+    specialCooldown: 7000,
+  },
+  {
+    id: 'gibbs',
+    name: 'Jahmyr Gibbs',
+    nickname: 'THE SONIC',
+    number: '26',
+    color: 0xffaa00,
+    colorHex: '#ffaa00',
+    helmetColor: '#cc8800',
+    jerseyColor: '#ffaa00',
+    pantsColor: '#0066cc',
+    emoji: '⚡',
+    description: 'RB | Detroit Lions',
+    special: 'Speed Dash',
+    specialDesc: 'Blitz-Sprint durch Gegner',
+    stats: { runSpeed: 480, jumpPower: -760, weight: 85, airSpeed: 280 },
+    specialCooldown: 4000,
+  },
+];
+
+// ============================================================
+//  PIXEL-ART SPRITE RENDERER (inspiriert von mario-mimic)
+// ============================================================
+class SpriteRenderer {
+  // Zeichnet einen Football-Spieler als Pixel-Art direkt auf Phaser Graphics
+  static drawPlayer(scene, x, y, charData, animFrame, facingRight, hitstun, frozen) {
+    // Wir nutzen Phaser's Graphics-Objekt für Pixel-Art
+    // Jeder Charakter bekommt seinen eigenen Look basierend auf Teamfarben
+    const g = scene.add.graphics();
+    g.setDepth(20);
+
+    const flip = facingRight ? 1 : -1;
+    const ox   = facingRight ? x - 24 : x + 24; // Offset für Flip
+
+    // Farben
+    const hc = parseInt(charData.helmetColor.replace('#',''), 16);
+    const jc = parseInt(charData.jerseyColor.replace('#',''), 16);
+    const pc = parseInt(charData.pantsColor.replace('#',''), 16);
+    const skin = 0xf5c5a0;
+    const dark = 0x111111;
+
+    // Bein-Animation (aus mario-mimic Idee)
+    const legOffset = animFrame % 2 === 0 ? 2 : -2;
+
+    // --- Zeichne Pixel-Art Footballer (48x64px) ---
+    const draw = (rx, ry, rw, rh, col, alpha = 1) => {
+      const realX = facingRight ? x - 24 + rx : x + 24 - rx - rw;
+      g.fillStyle(col, alpha);
+      g.fillRect(realX, y - 32 + ry, rw, rh);
+    };
+
+    // Helm
+    draw(8,  0, 32, 6, hc);           // Helm-Oben
+    draw(4,  4, 40, 14, hc);          // Helm-Seite
+    draw(6,  16, 8, 4, 0xaaaaaa);     // Faceguard links
+    draw(22, 16, 8, 4, 0xaaaaaa);     // Faceguard rechts
+    draw(6,  12, 36, 6, hc);          // Helm-Unten
+    // Helm-Stripe (Teamfarbe heller)
+    draw(18, 0, 12, 20, 0xffffff, 0.2);
+
+    // Gesicht / Hals
+    draw(10, 20, 28, 8, skin);
+    // Augen
+    draw(14, 22, 4, 3, dark);
+    draw(30, 22, 4, 3, dark);
+
+    // Jersey
+    draw(4,  28, 40, 18, jc);
+    // Trikotnummer
+    // (kleine weiße Rechtecke als "Nummer")
+    draw(16, 32, 4, 8, 0xffffff, 0.85);
+    draw(28, 32, 4, 8, 0xffffff, 0.85);
+
+    // Schulterpolster
+    draw(0,  28, 10, 8, hc);
+    draw(38, 28, 10, 8, hc);
+
+    // Handschuhe / Arme
+    draw(0,  36, 8, 6, 0x333333);
+    draw(40, 36, 8, 6, 0x333333);
+
+    // Hose
+    draw(8,  46, 32, 10, pc);
+
+    // Beine (animiert - aus mario-mimic übernommen)
+    draw(8  + legOffset, 56, 14, 8, pc);
+    draw(26 - legOffset, 56, 14, 8, pc);
+
+    // Schuhe
+    draw(6  + legOffset, 62, 16, 6, 0x222222);
+    draw(26 - legOffset, 62, 16, 6, 0x222222);
+
+    // Hitstun-Effekt: roter Overlay
+    if (hitstun > 0) {
+      g.fillStyle(0xff0000, 0.4);
+      g.fillRect(x - 24, y - 32, 48, 68);
+    }
+    // Frozen-Effekt: blauer Overlay
+    if (frozen > 0) {
+      g.fillStyle(0x88ccff, 0.5);
+      g.fillRect(x - 24, y - 32, 48, 68);
+    }
+
+    return g;
+  }
+
+  // Hitbox-Flash als kurzes Highlight
+  static drawAttackFX(scene, x, y, dir) {
+    const g = scene.add.graphics();
+    g.setDepth(25);
+    g.fillStyle(0xffff00, 0.5);
+    g.fillCircle(x + dir * 42, y, 28);
+    scene.tweens.add({ targets: g, alpha: 0, duration: 120, onComplete: () => g.destroy() });
+  }
+
+  // Special FX Partikel
+  static spawnFX(scene, x, y, col1, col2, count) {
+    for (let i = 0; i < count; i++) {
+      const p = scene.add.circle(
+        x + Phaser.Math.Between(-60,60),
+        y + Phaser.Math.Between(-60,60),
+        Phaser.Math.Between(4,14),
+        Phaser.Math.RND.pick([col1, col2]), 0.9
+      );
+      p.setDepth(30);
+      scene.tweens.add({
+        targets: p, alpha: 0, scaleX: 2.2, scaleY: 2.2,
+        x: p.x + Phaser.Math.Between(-90,90),
+        y: p.y + Phaser.Math.Between(-90,90),
+        duration: 500 + Phaser.Math.Between(0,400),
+        onComplete: () => p.destroy()
+      });
+    }
+  }
+}
+
+// ============================================================
+//  AI Controller
+// ============================================================
+class AIController {
+  constructor() {
+    this.keys = { left:false, right:false, up:false, down:false, jump:false, attack:false, special:false };
+    this.jumpCooldown   = 0;
+    this.attackCooldown = 0;
+    this.idleTimer      = 0;
+    this.idleDir        = 1;
+  }
+
+  update(fighter, target, delta) {
+    this.jumpCooldown   -= delta;
+    this.attackCooldown -= delta;
+    this.idleTimer      -= delta;
+
+    Object.keys(this.keys).forEach(k => this.keys[k] = false);
+
+    if (!target || target.stocks <= 0) return this.keys;
+
+    const f   = fighter;
+    const t   = target;
+    const dx  = t.sprite.x - f.sprite.x;
+    const dy  = t.sprite.y - f.sprite.y;
+    const dist = Math.abs(dx);
+    const onGround = f.sprite.body.blocked.down;
+
+    // Bewege auf Ziel zu
+    if (dist > 55) {
+      if (dx > 0) this.keys.right = true;
+      else        this.keys.left  = true;
+    } else if (dist < 30 && this.idleTimer <= 0) {
+      // Zu nah – ausweichen
+      this.idleDir = dx > 0 ? -1 : 1;
+      this.idleTimer = 400;
+    }
+    if (this.idleTimer > 0) {
+      if (this.idleDir > 0) this.keys.right = true;
+      else                  this.keys.left  = true;
+    }
+
+    // Sprung (um Ziel zu erreichen oder Kante meiden)
+    if ((dy < -70 || f.sprite.x < 250 || f.sprite.x > 1030) && onGround && this.jumpCooldown <= 0) {
+      this.keys.jump = true;
+      this.jumpCooldown = 700 + Math.random()*300;
+    }
+
+    // Angriff
+    if (dist < 90 && this.attackCooldown <= 0) {
+      this.keys.attack = true;
+      this.attackCooldown = 450 + Math.random()*250;
+    }
+
+    // Gelegentlich Special
+    if (dist < 200 && Math.random() < 0.002) this.keys.special = true;
+
+    return this.keys;
+  }
+}
+
+// ============================================================
+//  Fighter Klasse
+// ============================================================
+class Fighter {
+  constructor(scene, x, y, playerIndex, charData, isAI = false) {
+    this.scene       = scene;
+    this.playerIndex = playerIndex;
+    this.charData    = charData;
+    this.isAI        = isAI;
+
+    this.stats = {
+      walkSpeed: 220, runSpeed: 360, jumpPower: -750,
+      airSpeed: 200, fallSpeed: 900, fastFallSpeed: 1400,
+      weight: 100, jumpCount: 2, ...charData.stats
+    };
+
+    this.name      = charData.name;
+    this.color     = charData.color;
+    this.stocks    = 4;
+    this.damage    = 0;
+    this.jumpsLeft = this.stats.jumpCount;
+    this.specialCooldownMax = charData.specialCooldown || 6000;
+    this.specialCooldown    = 0;
+
+    this.state = {
+      attacking: false, hitstun: 0, fastFalling: false,
+      facingRight: playerIndex === 0, frozen: 0,
+      animFrame: 0, animTimer: 0
+    };
+
+    // Physik-Sprite (unsichtbar, nur Hitbox)
+    this.sprite = scene.add.rectangle(x, y, 48, 64, 0x000000, 0);
+    scene.physics.add.existing(this.sprite);
+    this.sprite.body.setMaxVelocity(800, 1800);
+    this.sprite.body.setDragX(1200);
+    this.sprite.body.setCollideWorldBounds(false);
+    this.sprite.owner = this;
+
+    // Pixel-Art Grafik-Container (wird jeden Frame neu gezeichnet)
+    this.gfx = null;
+
+    this.attackCooldown = 0;
+    this.ai = isAI ? new AIController() : null;
+  }
+
+  update(cursors, delta, target) {
+    // AI generiert eigene Inputs
+    if (this.isAI && this.ai) cursors = this.ai.update(this, target, delta);
+
+    const body     = this.sprite.body;
+    const onGround = body.blocked.down;
+
+    // Animation Timer (aus mario-mimic)
+    this.state.animTimer += delta;
+    if (this.state.animTimer > 120) {
+      this.state.animFrame = (this.state.animFrame + 1) % 4;
+      this.state.animTimer = 0;
+    }
+
+    // Frozen
+    if (this.state.frozen > 0) {
+      this.state.frozen -= delta;
+      this._redraw();
+      return;
+    }
+
+    // Hitstun
+    if (this.state.hitstun > 0) {
+      this.state.hitstun -= delta;
+      this._redraw();
+      return;
+    }
+
+    if (this.attackCooldown  > 0) this.attackCooldown  -= delta;
+    if (this.specialCooldown > 0) this.specialCooldown -= delta;
+
+    // Input lesen
+    const goLeft     = this.isAI ? cursors.left    : cursors.left.isDown;
+    const goRight    = this.isAI ? cursors.right   : cursors.right.isDown;
+    const goDown     = this.isAI ? cursors.down    : cursors.down.isDown;
+    const goUp       = this.isAI ? cursors.up      : cursors.up.isDown;
+    const jumpJD     = this.isAI ? cursors.jump    : Phaser.Input.Keyboard.JustDown(cursors.jump);
+    const atkJD      = this.isAI ? cursors.attack  : Phaser.Input.Keyboard.JustDown(cursors.attack);
+    const spJD       = this.isAI ? cursors.special : (cursors.special && Phaser.Input.Keyboard.JustDown(cursors.special));
+
+    // Bewegung (Friction-basiert wie mario-mimic)
+    if (goLeft) {
+      const spd = onGround ? -this.stats.runSpeed : -this.stats.airSpeed;
+      body.setVelocityX(Math.max(body.velocity.x - 60, spd));
+      this.state.facingRight = false;
+    } else if (goRight) {
+      const spd = onGround ? this.stats.runSpeed : this.stats.airSpeed;
+      body.setVelocityX(Math.min(body.velocity.x + 60, spd));
+      this.state.facingRight = true;
+    }
+
+    // Sprung
+    if (jumpJD) {
+      if (onGround) this.jumpsLeft = this.stats.jumpCount;
+      if (this.jumpsLeft > 0) {
+        body.setVelocityY(this.stats.jumpPower);
+        this.jumpsLeft--;
+        this.state.fastFalling = false;
+      }
+    }
+
+    // Fast Fall / Durchfall
+    if (!onGround && goDown && body.velocity.y > 0) this.state.fastFalling = true;
+    body.setMaxVelocityY(this.state.fastFalling ? this.stats.fastFallSpeed : this.stats.fallSpeed);
+    if (onGround) { this.jumpsLeft = this.stats.jumpCount; this.state.fastFalling = false; }
+
+    // Angriff
+    if (atkJD && this.attackCooldown <= 0) this._doAttack(goDown, goUp);
+    if (spJD  && this.specialCooldown <= 0) this._doSpecial(goDown, goUp);
+
+    this._redraw();
+  }
+
+  _redraw() {
+    // Altes Sprite löschen und neu zeichnen (Pixel-Art Animation)
+    if (this.gfx) this.gfx.destroy();
+    this.gfx = SpriteRenderer.drawPlayer(
+      this.scene,
+      this.sprite.x, this.sprite.y,
+      this.charData,
+      this.state.animFrame,
+      this.state.facingRight,
+      this.state.hitstun,
+      this.state.frozen
+    );
+  }
+
+  _doAttack(down, up) {
+    if (this.state.attacking) return;
+    this.state.attacking = true;
+    this.attackCooldown  = 400;
+
+    const dir = this.state.facingRight ? 1 : -1;
+    const ox  = this.sprite.x + dir * 50;
+    const oy  = up ? this.sprite.y - 40 : down ? this.sprite.y + 40 : this.sprite.y;
+
+    SpriteRenderer.drawAttackFX(this.scene, this.sprite.x, this.sprite.y, dir);
+
+    this.scene.fighters.forEach(other => {
+      if (other === this) return;
+      if (Phaser.Geom.Intersects.RectangleToRectangle(
+        new Phaser.Geom.Rectangle(ox-30, oy-25, 60, 50),
+        other.sprite.getBounds()
+      )) other.receiveHit(12, dir, up ? -1 : 0);
+    });
+    this.scene.time.delayedCall(130, () => { this.state.attacking = false; });
+  }
+
+  _doSpecial(down, up) {
+    this.specialCooldown = this.specialCooldownMax;
+    const id  = this.charData.id;
+    const dir = this.state.facingRight ? 1 : -1;
+
+    this.scene.cameras.main.shake(120, 0.008);
+
+    if (id === 'allen') {
+      SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0x88ccff, 0xffffff, 24);
+      this.scene.fighters.forEach(other => {
+        if (other === this) return;
+        const d = Phaser.Math.Distance.Between(this.sprite.x, this.sprite.y, other.sprite.x, other.sprite.y);
+        if (d < 300) other.state.frozen = 1800;
+      });
+    }
+    else if (id === 'bijan') {
+      this.sprite.body.setVelocityY(-1100);
+      SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0xcc0000, 0xff8800, 12);
+      this.scene.time.delayedCall(380, () => {
+        this.sprite.body.setVelocityY(1300);
+        this.scene.time.delayedCall(280, () => {
+          SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0xff4400, 0xffcc00, 18);
+          this.scene.fighters.forEach(other => {
+            if (other === this) return;
+            if (Math.abs(other.sprite.y - this.sprite.y) < 80 && Math.abs(other.sprite.x - this.sprite.x) < 110)
+              other.receiveHit(20, dir, -0.5);
+          });
+        });
+      });
+    }
+    else if (id === 'pickens') {
+      SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0x003594, 0xffffff, 10);
+      // Lasso-Linie zeichnen
+      const line = this.scene.add.graphics();
+      line.setDepth(15);
+      line.lineStyle(3, 0xcc8833, 0.9);
+      line.lineBetween(this.sprite.x, this.sprite.y, this.sprite.x + dir*380, this.sprite.y);
+      this.scene.tweens.add({ targets: line, alpha: 0, duration: 400, onComplete: () => line.destroy() });
+
+      this.scene.fighters.forEach(other => {
+        if (other === this) return;
+        const dx = other.sprite.x - this.sprite.x;
+        if (Math.sign(dx) === dir && Math.abs(dx) < 400) {
+          other.sprite.body.setVelocityX(-dx * 3);
+          other.sprite.body.setVelocityY(-200);
+          other.receiveHit(8, -dir, 0);
+        }
+      });
+    }
+    else if (id === 'gibbs') {
+      SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0xffaa00, 0xffff00, 28);
+      this.sprite.body.setVelocityX(dir * 1200);
+      // Speed-Lines
+      for (let i = 0; i < 5; i++) {
+        this.scene.time.delayedCall(i * 60, () => {
+          SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0xffdd00, 0xffffff, 4);
+        });
+      }
+      for (let t = 0; t < 420; t += 50) {
+        this.scene.time.delayedCall(t, () => {
+          this.scene.fighters.forEach(other => {
+            if (other === this) return;
+            if (Phaser.Geom.Intersects.RectangleToRectangle(this.sprite.getBounds(), other.sprite.getBounds()))
+              other.receiveHit(10, dir, -0.3);
+          });
+        });
+      }
+    }
+  }
+
+  receiveHit(baseDamage, dirX, dirY = 0) {
+    if (this.state.frozen > 0) { this.state.frozen = 0; return; }
+    this.damage += baseDamage;
+    const kb = ((this.damage * 0.1 + 0.1) * (baseDamage + 5) * (200 / (this.stats.weight + 100)) * 1.4 + 4) * 18;
+    this.sprite.body.setVelocity(dirX * kb, dirY !== 0 ? dirY * kb * 0.8 : -kb * 0.6);
+    this.state.hitstun = Math.min(kb * 1.2, 600);
+    this.scene.cameras.main.shake(80, 0.006);
+  }
+
+  loseStock() {
+    this.stocks--;
+    this.damage = 0;
+    this.scene.events.emit('stockLost', this.playerIndex, this.stocks);
+    if (this.stocks <= 0) {
+      this.scene.events.emit('playerOut', this.playerIndex);
+      this.sprite.setVisible(false);
+      if (this.gfx) { this.gfx.destroy(); this.gfx = null; }
+      return;
+    }
+    const spawnX = this.playerIndex === 0 ? 320 : 960;
+    this.sprite.setPosition(spawnX, 200);
+    this.sprite.body.setVelocity(0, 0);
+    this.state.hitstun = 0; this.state.frozen = 0;
+  }
+
+  isOutOfBounds(W, H) {
+    return this.sprite.x < -200 || this.sprite.x > W+200 || this.sprite.y < -300 || this.sprite.y > H+100;
+  }
+
+  destroy() {
+    this.sprite.destroy();
+    if (this.gfx) this.gfx.destroy();
+  }
+}
+
+// ============================================================
+//  CharSelectScene
+// ============================================================
+class CharSelectScene extends Phaser.Scene {
+  constructor() { super({ key: 'CharSelectScene' }); }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    this.p1Selected = 0;
+    this.selectionConfirmed = false;
+
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(0x050514, 0x050514, 0x0a1a35, 0x0a1a35, 1);
+    bg.fillRect(0, 0, W, H);
+    for (let i=0;i<60;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.FloatBetween(0.5,2),0xffffff,Phaser.Math.FloatBetween(0.2,0.7));
+
+    this.add.text(W/2, 28, 'FOOTBALL LEAGUE OF LEGENDS', {
+      fontSize:'22px', fontFamily:'Arial Black', color:'#ffcc00', stroke:'#000', strokeThickness:4
+    }).setOrigin(0.5);
+    this.add.text(W/2, 62, 'CHARAKTER WÄHLEN', {
+      fontSize:'16px', fontFamily:'Arial Black', color:'#aaccff', stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5);
+
+    // Charakter-Vorschau mit Pixel-Art (kleiner)
+    this.cards = [];
+    const cardW = 260, cardH = 330;
+    const totalW = CHARACTERS.length * (cardW + 20) - 20;
+    const startX = (W - totalW) / 2 + cardW / 2;
+
+    CHARACTERS.forEach((char, i) => {
+      const cx = startX + i * (cardW + 20);
+      const cy = H / 2 + 25;
+
+      const card = this.add.graphics();
+      const drawCard = (sel) => {
+        card.clear();
+        card.fillStyle(sel ? 0x1a3a6a : 0x0d1a2e, 1);
+        card.fillRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 14);
+        card.lineStyle(sel ? 4 : 2, sel ? 0x44aaff : 0x334466, 1);
+        card.strokeRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 14);
+      };
+      drawCard(i === 0);
+
+      // Charakter-Farb-Band oben
+      const band = this.add.graphics();
+      band.fillStyle(char.color, 0.8);
+      band.fillRoundedRect(cx-cardW/2+10, cy-cardH/2+10, cardW-20, 8, 4);
+
+      // Nummer-Badge
+      const badge = this.add.graphics();
+      badge.fillStyle(char.color, 1);
+      badge.fillCircle(cx+cardW/2-28, cy-cardH/2+30, 22);
+      this.add.text(cx+cardW/2-28, cy-cardH/2+30, char.number, {
+        fontSize:'16px', fontFamily:'Arial Black', color:'#fff'
+      }).setOrigin(0.5);
+
+      // Emoji groß
+      this.add.text(cx, cy-80, char.emoji, { fontSize:'60px' }).setOrigin(0.5);
+
+      // Name
+      this.add.text(cx, cy+16, char.name, {
+        fontSize:'17px', fontFamily:'Arial Black', color:'#ffffff',
+        stroke:'#000', strokeThickness:3, wordWrap:{width:cardW-20}, align:'center'
+      }).setOrigin(0.5);
+
+      this.add.text(cx, cy+46, char.description, {
+        fontSize:'12px', fontFamily:'Arial', color:'#aaaaaa'
+      }).setOrigin(0.5);
+
+      this.add.text(cx, cy+72, `✨ ${char.special}`, {
+        fontSize:'13px', fontFamily:'Arial Black', color:char.colorHex, stroke:'#000', strokeThickness:2
+      }).setOrigin(0.5);
+
+      this.add.text(cx, cy+96, char.specialDesc, {
+        fontSize:'11px', fontFamily:'Arial', color:'#cccccc', wordWrap:{width:cardW-20}, align:'center'
+      }).setOrigin(0.5);
+
+      // Stat-Balken (Speed / Weight)
+      const barY = cy + 130;
+      this.add.text(cx-cardW/2+14, barY,    'SPD', {fontSize:'10px', color:'#88aacc'});
+      this.add.text(cx-cardW/2+14, barY+18, 'WGT', {fontSize:'10px', color:'#88aacc'});
+      const sg = this.add.graphics();
+      sg.fillStyle(0x00ff88,1);
+      sg.fillRoundedRect(cx-cardW/2+40, barY+1, Math.floor(((char.stats.runSpeed-300)/200)*(cardW-80)), 8, 4);
+      sg.fillStyle(0xff8800,1);
+      sg.fillRoundedRect(cx-cardW/2+40, barY+19, Math.floor(((char.stats.weight-80)/40)*(cardW-80)), 8, 4);
+
+      const zone = this.add.zone(cx, cy, cardW, cardH).setInteractive();
+      zone.on('pointerover',  () => { drawCard(true);  this.input.setDefaultCursor('pointer'); });
+      zone.on('pointerout',   () => { drawCard(i===this.p1Selected); this.input.setDefaultCursor('default'); });
+      zone.on('pointerdown',  () => { this.p1Selected=i; this.cards.forEach(c=>c.draw(c.i===i)); });
+
+      this.cards.push({ draw: drawCard, i });
+    });
+
+    this.aiCharIndex = Phaser.Math.Between(0, CHARACTERS.length-1);
+    this.add.text(W-20, 28, '🤖 CPU: '+CHARACTERS[this.aiCharIndex].emoji+' '+CHARACTERS[this.aiCharIndex].name, {
+      fontSize:'13px', fontFamily:'Arial Black', color:'#ff8866', stroke:'#000', strokeThickness:3
+    }).setOrigin(1,0);
+
+    this.add.text(W/2, H-50, '⚔️  VS COMPUTER  —  Klick zum Auswählen  —  LEERTASTE zum Starten', {
+      fontSize:'13px', fontFamily:'Arial Black', color:'#aaccff', stroke:'#000', strokeThickness:2
+    }).setOrigin(0.5);
+
+    this.input.keyboard.on('keydown-LEFT',  () => { this.p1Selected=Math.max(0,this.p1Selected-1); this.cards.forEach(c=>c.draw(c.i===this.p1Selected)); });
+    this.input.keyboard.on('keydown-RIGHT', () => { this.p1Selected=Math.min(CHARACTERS.length-1,this.p1Selected+1); this.cards.forEach(c=>c.draw(c.i===this.p1Selected)); });
+    this.input.keyboard.once('keydown-SPACE', () => this._start());
+    this.input.keyboard.once('keydown-ENTER', () => this._start());
+  }
+
+  _start() {
+    if (this.selectionConfirmed) return;
+    this.selectionConfirmed = true;
+    this.scene.start('GameScene', { p1CharIndex: this.p1Selected, aiCharIndex: this.aiCharIndex });
+  }
+}
+
+// ============================================================
+//  HUDScene
+// ============================================================
+class HUDScene extends Phaser.Scene {
+  constructor() { super({ key: 'HUDScene' }); }
+  init(d) { this.fighters = d.fighters || []; }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+
+    const hud = this.add.graphics();
+    hud.fillStyle(0x000000, 0.75);
+    hud.fillRect(0, H-130, W, 130);
+    hud.lineStyle(2, 0x334455, 1);
+    hud.lineBetween(0, H-130, W, H-130);
+    hud.lineStyle(1, 0x334455, 0.8);
+    hud.lineBetween(W/2, H-130, W/2, H);
+
+    this.hudElements = this.fighters.map((f, i) => {
+      const cx = i===0 ? W*0.25 : W*0.75;
+      const cy = H-65;
+
+      const bar = this.add.graphics();
+      bar.fillStyle(f.color, 0.9);
+      bar.fillRect(i===0?0:W/2, H-132, W/2, 5);
+
+      this.add.text(cx-80, cy-28, f.charData.emoji, {fontSize:'28px'}).setOrigin(0.5);
+      this.add.text(cx+10, cy-38, f.charData.name, {
+        fontSize:'17px', fontFamily:'Arial Black', color:'#fff', stroke:'#000', strokeThickness:4
+      }).setOrigin(0.5);
+      if (f.isAI) this.add.text(cx+110, cy-38, '🤖', {fontSize:'16px'}).setOrigin(0.5);
+
+      const dmg = this.add.text(cx, cy+6, '0%', {
+        fontSize:'44px', fontFamily:'Arial Black', color:'#00ff88', stroke:'#000', strokeThickness:5
+      }).setOrigin(0.5);
+
+      const spLabel = this.add.text(cx, cy-12, '', {
+        fontSize:'10px', fontFamily:'Arial', color:'#aaaaaa'
+      }).setOrigin(0.5);
+
+      const icons = [];
+      for (let s=0;s<4;s++) {
+        const ic = this.add.circle(cx-33+s*22, cy+50, 8, f.color, 1);
+        ic.setStrokeStyle(2, 0xffffff, 0.5);
+        icons.push(ic);
+      }
+      return { dmg, icons, fighter: f, spLabel };
+    });
+
+    this.add.text(W/2, 18, 'FOOTBALL LEAGUE OF LEGENDS', {
+      fontSize:'15px', fontFamily:'Arial Black', color:'#ffcc00', stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5);
+    this.add.text(W/2, 42, 'FREE FOR ALL  —  VS CPU', {
+      fontSize:'12px', fontFamily:'Arial', color:'#888888'
+    }).setOrigin(0.5);
+
+    const hint = this.add.text(W/2, H-145,
+      'WASD=Bewegen | W=Springen | S=Durchfall | F=Angriff | G=Special',
+      {fontSize:'11px', fontFamily:'Arial', color:'#667788'}
+    ).setOrigin(0.5);
+    this.tweens.add({targets:hint, alpha:0, delay:4500, duration:1000});
+  }
+
+  update() {
+    if (!this.hudElements) return;
+    this.hudElements.forEach(({dmg, icons, fighter, spLabel}) => {
+      const p = Math.floor(fighter.damage);
+      dmg.setText(`${p}%`);
+      dmg.setColor(p<50?'#00ff88':p<100?'#ffdd00':p<150?'#ff8800':'#ff2244');
+      icons.forEach((ic,s) => { ic.setFillStyle(s<fighter.stocks?fighter.color:0x222222,1); ic.setScale(s<fighter.stocks?1:0.7); });
+      const cd = fighter.specialCooldown;
+      spLabel.setText(cd>0 ? `✨ ${Math.ceil(cd/1000)}s` : '✨ READY!');
+      spLabel.setColor(cd>0 ? '#888888' : '#ffdd00');
+    });
+  }
+}
+
+// ============================================================
+//  GameScene
+// ============================================================
+class GameScene extends Phaser.Scene {
+  constructor() { super({ key: 'GameScene' }); }
+  init(d) { this.p1Idx = d.p1CharIndex??0; this.aiIdx = d.aiCharIndex??1; }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    this.fighters = [];
+    this.gameOver  = false;
+
+    // BG
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(0x0a0a2e, 0x0a0a2e, 0x1a1a4e, 0x1a1a4e, 1);
+    bg.fillRect(0, 0, W, H);
+    for (let i=0;i<60;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H*0.6),Phaser.Math.FloatBetween(1,3),0xffffff,Phaser.Math.FloatBetween(0.2,0.8));
+    const grass = this.add.graphics();
+    grass.fillGradientStyle(0x1a5c1a,0x1a5c1a,0x0d3d0d,0x0d3d0d,1);
+    grass.fillRect(0, H-80, W, 80);
+
+    // Blast Zone
+    const bz = this.add.graphics();
+    bz.lineStyle(1, 0xff3333, 0.2);
+    bz.strokeRect(200, 90, W-400, H-150);
+    this.add.text(W/2, 96, '— BLAST ZONE —', {fontSize:'11px', color:'#ff3333', alpha:0.4}).setOrigin(0.5);
+
+    // Plattformen
+    this.solidPlatforms = this.physics.add.staticGroup();
+    this.passPlatforms  = this.physics.add.staticGroup();
+    const gfx = this.add.graphics();
+
+    const addSolid = (x,y,w,h) => {
+      gfx.fillStyle(0x4a7fa5,1); gfx.fillRoundedRect(x-w/2,y-h/2,w,h,6);
+      gfx.lineStyle(2,0x8899aa,0.9); gfx.strokeRoundedRect(x-w/2,y-h/2,w,h,6);
+      const p = this.add.rectangle(x,y,w,h); this.physics.add.existing(p,true);
+      this.solidPlatforms.add(p);
+    };
+    const addPass = (x,y,w,h) => {
+      gfx.fillStyle(0x3a6f95,1); gfx.fillRoundedRect(x-w/2,y-h/2,w,h,6);
+      gfx.lineStyle(2,0x7799bb,0.8); gfx.strokeRoundedRect(x-w/2,y-h/2,w,h,6);
+      const p = this.add.rectangle(x,y,w,h); this.physics.add.existing(p,true);
+      this.passPlatforms.add(p); return p;
+    };
+
+    addSolid(W/2, H-100, 760, 24);
+    addPass(W/2,       H-280, 280, 18);
+    addPass(W/2 - 240, H-210, 220, 18);
+    addPass(W/2 + 240, H-210, 220, 18);
+
+    // Fighter
+    const p1 = new Fighter(this, 320, 400, 0, CHARACTERS[this.p1Idx], false);
+    const p2 = new Fighter(this, 960, 400, 1, CHARACTERS[this.aiIdx], true);
+    this.fighters = [p1, p2];
+
+    // Kollisionen
+    this.fighters.forEach(f => {
+      this.physics.add.collider(f.sprite, this.solidPlatforms);
+      this.physics.add.collider(f.sprite, this.passPlatforms, null, (sprite, plat) => {
+        const body     = sprite.body;
+        const platTop  = plat.y - plat.height/2;
+        const sprBot   = sprite.y + sprite.height/2;
+        const falling  = body.velocity.y > 0;
+        const dropping = f.state.fastFalling;
+        if (dropping) return false;
+        return falling && (sprBot - platTop) < 18;
+      });
+    });
+
+    // Controls
+    const kb = this.input.keyboard;
+    this.p1Controls = {
+      left:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+      right:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+      up:      kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      down:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+      jump:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      attack:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.F),
+      special: kb.addKey(Phaser.Input.Keyboard.KeyCodes.G),
+    };
+
+    this.scene.launch('HUDScene', { fighters: this.fighters });
+    this.events.on('playerOut', () => this._checkGameOver());
+  }
+
+  update(time, delta) {
+    if (this.gameOver) return;
+    const W=this.scale.width, H=this.scale.height;
+    const p1=this.fighters[0], p2=this.fighters[1];
+    if (p1?.stocks > 0) p1.update(this.p1Controls, delta, p2);
+    if (p2?.stocks > 0) p2.update(null, delta, p1);
+    this.fighters.forEach(f => { if (f.stocks>0 && f.isOutOfBounds(W,H)) f.loseStock(); });
+  }
+
+  _checkGameOver() {
+    const alive = this.fighters.filter(f=>f.stocks>0);
+    if (alive.length<=1) {
+      this.gameOver=true;
+      const winner = alive.length===1 ? alive[0].charData.name : 'Unentschieden';
+      const winIsPlayer = alive.length===1 && !alive[0].isAI;
+      this.time.delayedCall(600, ()=>{ this.scene.stop('HUDScene'); this.scene.start('MenuScene',{winner,winnerIsPlayer:winIsPlayer}); });
+    }
+  }
+}
+
+// ============================================================
+//  MenuScene
+// ============================================================
+class MenuScene extends Phaser.Scene {
+  constructor() { super({ key: 'MenuScene' }); }
+  init(d) { this.winner=d?.winner||null; this.winnerIsPlayer=d?.winnerIsPlayer; }
+
+  create() {
+    const W=this.scale.width, H=this.scale.height;
+    const bg=this.add.graphics();
+    bg.fillGradientStyle(0x050510,0x050510,0x0d1a2e,0x0d1a2e,1);
+    bg.fillRect(0,0,W,H);
+    for(let i=0;i<80;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.FloatBetween(0.5,2.5),0xffffff,Phaser.Math.FloatBetween(0.2,0.8));
+
+    this.add.text(W/2,H*0.14,'🏈',{fontSize:'64px'}).setOrigin(0.5);
+    this.add.text(W/2,H*0.28,'FOOTBALL',{fontSize:'72px',fontFamily:'Arial Black',color:'#ffcc00',stroke:'#aa6600',strokeThickness:8}).setOrigin(0.5);
+    this.add.text(W/2,H*0.42,'LEAGUE OF LEGENDS',{fontSize:'32px',fontFamily:'Arial Black',color:'#ffffff',stroke:'#003366',strokeThickness:5}).setOrigin(0.5);
+    this.add.text(W/2,H*0.51,'★  ★  ★  ★  ★',{fontSize:'20px',color:'#ffaa00'}).setOrigin(0.5);
+
+    if(this.winner){
+      const msg=this.winnerIsPlayer?`🏆 ${this.winner} GEWINNT!`:this.winner==='Unentschieden'?'🤝 UNENTSCHIEDEN!':`🤖 CPU GEWINNT! (${this.winner})`;
+      const col=this.winnerIsPlayer?'#ffdd00':this.winner==='Unentschieden'?'#aaaaff':'#ff6644';
+      this.add.text(W/2,H*0.62,msg,{fontSize:'34px',fontFamily:'Arial Black',color:col,stroke:'#000',strokeThickness:5}).setOrigin(0.5);
+    }
+
+    const btnY=this.winner?H*0.79:H*0.67;
+    const btnBg=this.add.graphics();
+    const drawBtn=(col,brd)=>{ btnBg.clear(); btnBg.fillStyle(col,1); btnBg.fillRoundedRect(W/2-170,btnY-30,340,58,12); btnBg.lineStyle(2,brd,0.9); btnBg.strokeRoundedRect(W/2-170,btnY-30,340,58,12); };
+    drawBtn(0x1a5fa0,0x44aaff);
+    this.add.text(W/2,btnY,'▶  CHARAKTER WÄHLEN',{fontSize:'22px',fontFamily:'Arial Black',color:'#fff',stroke:'#000',strokeThickness:3}).setOrigin(0.5);
+    const z=this.add.zone(W/2,btnY,340,58).setInteractive();
+    z.on('pointerover',()=>{drawBtn(0x2a7fd0,0x88ccff);this.input.setDefaultCursor('pointer');});
+    z.on('pointerout', ()=>{drawBtn(0x1a5fa0,0x44aaff);this.input.setDefaultCursor('default');});
+    z.on('pointerdown',()=>this.scene.start('CharSelectScene'));
+    this.input.keyboard.once('keydown-SPACE',()=>this.scene.start('CharSelectScene'));
+    this.input.keyboard.once('keydown-ENTER',()=>this.scene.start('CharSelectScene'));
+
+    const press=this.add.text(W/2,btnY+52,'oder LEERTASTE drücken',{fontSize:'13px',fontFamily:'Arial',color:'#667788'}).setOrigin(0.5);
+    this.tweens.add({targets:press,alpha:0.2,duration:900,yoyo:true,repeat:-1});
+
+    this.add.text(W/2,H*0.91,'🎮  WASD + F (Angriff) + G (Special)  |  ← → Pfeiltasten im Charselect',{fontSize:'12px',fontFamily:'Arial Black',color:'#556677'}).setOrigin(0.5);
+    this.add.text(W-10,H-10,'v0.3',{fontSize:'11px',color:'#334455'}).setOrigin(1,1);
+  }
+}
+
+// ============================================================
+//  START
+// ============================================================
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: 1280, height: 720,
+  parent: 'game-container',
+  backgroundColor: '#1a1a2e',
+  physics: { default:'arcade', arcade:{ gravity:{y:1800}, debug:false } },
+  scene: [MenuScene, CharSelectScene, GameScene, HUDScene]
+});
+</script>
+</body>
+</html>
