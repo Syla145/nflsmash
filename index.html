@@ -254,62 +254,113 @@ class SpriteRenderer {
 }
 
 // ============================================================
-//  AI Controller
+//  AI Controller – 3 Schwierigkeitsgrade
 // ============================================================
 class AIController {
-  constructor() {
-    this.keys = { left:false, right:false, up:false, down:false, jump:false, attack:false, special:false };
-    this.jumpCooldown   = 0;
-    this.attackCooldown = 0;
-    this.idleTimer      = 0;
-    this.idleDir        = 1;
+  constructor(difficulty = 'medium') {
+    this.difficulty = difficulty; // 'easy' | 'medium' | 'hard'
+    this.keys = { left:false, right:false, up:false, down:false, jump:false, attack:false, ranged:false, special:false };
+    this.jumpCooldown    = 0;
+    this.attackCooldown  = 0;
+    this.rangedCooldown  = 0;
+    this.idleTimer       = 0;
+    this.idleDir         = 1;
+    this.dodgeTimer      = 0;
+    this.dodgeDir        = 0;
+    this.reactionDelay   = 0; // simuliert menschliche Reaktionszeit
+
+    // Schwierigkeits-Parameter
+    const cfg = {
+      easy:   { reactionMs:400, attackRange:70,  jumpChance:0.3, dodgeChance:0.1, rangedChance:0.001, specialChance:0.0005, aimError:80  },
+      medium: { reactionMs:180, attackRange:100, jumpChance:0.6, dodgeChance:0.3, rangedChance:0.003, specialChance:0.001,  aimError:30  },
+      hard:   { reactionMs:50,  attackRange:120, jumpChance:0.9, dodgeChance:0.7, rangedChance:0.006, specialChance:0.003,  aimError:5   },
+    };
+    this.cfg = cfg[difficulty] || cfg.medium;
+    this._pendingKeys = { ...this.keys };
+    this._keyDelay = 0;
   }
 
   update(fighter, target, delta) {
     this.jumpCooldown   -= delta;
     this.attackCooldown -= delta;
+    this.rangedCooldown -= delta;
     this.idleTimer      -= delta;
+    this.dodgeTimer     -= delta;
+    this._keyDelay      -= delta;
+
+    // Reaktionsverzögerung: Hard = schnell, Easy = langsam
+    if (this._keyDelay > 0) return this.keys;
 
     Object.keys(this.keys).forEach(k => this.keys[k] = false);
 
     if (!target || target.stocks <= 0) return this.keys;
 
-    const f   = fighter;
-    const t   = target;
-    const dx  = t.sprite.x - f.sprite.x;
-    const dy  = t.sprite.y - f.sprite.y;
+    const f  = fighter;
+    const t  = target;
+    const dx = t.sprite.x - f.sprite.x;
+    const dy = t.sprite.y - f.sprite.y;
     const dist = Math.abs(dx);
     const onGround = f.sprite.body.blocked.down;
+    const cfg = this.cfg;
 
-    // Bewege auf Ziel zu
-    if (dist > 55) {
-      if (dx > 0) this.keys.right = true;
-      else        this.keys.left  = true;
-    } else if (dist < 30 && this.idleTimer <= 0) {
-      // Zu nah – ausweichen
-      this.idleDir = dx > 0 ? -1 : 1;
-      this.idleTimer = 400;
+    // === AUSWEICHEN bei hohem Schaden ===
+    if (t.state.attacking && dist < 130 && Math.random() < cfg.dodgeChance && this.dodgeTimer <= 0) {
+      this.dodgeDir  = dx > 0 ? -1 : 1; // weg vom Angreifer
+      this.dodgeTimer = 300 + Math.random() * 200;
+    }
+    if (this.dodgeTimer > 0) {
+      if (this.dodgeDir > 0) this.keys.right = true; else this.keys.left = true;
+      // Sprung als Dodge
+      if (onGround && Math.random() < 0.3 && this.jumpCooldown <= 0) {
+        this.keys.jump = true; this.jumpCooldown = 500;
+      }
+      this._keyDelay = cfg.reactionMs;
+      return this.keys;
+    }
+
+    // === KANTE MEIDEN ===
+    if (f.sprite.x < 230) { this.keys.right = true; }
+    else if (f.sprite.x > 1050) { this.keys.left = true; }
+    else {
+      // === AUF ZIEL ZUBEWEGEN ===
+      if (dist > cfg.attackRange + 20) {
+        if (dx > 0) this.keys.right = true; else this.keys.left = true;
+      } else if (dist < 40 && this.idleTimer <= 0) {
+        this.idleDir = dx > 0 ? -1 : 1;
+        this.idleTimer = 300 + Math.random() * 200;
+      }
     }
     if (this.idleTimer > 0) {
-      if (this.idleDir > 0) this.keys.right = true;
-      else                  this.keys.left  = true;
+      if (this.idleDir > 0) this.keys.right = true; else this.keys.left = true;
     }
 
-    // Sprung (um Ziel zu erreichen oder Kante meiden)
-    if ((dy < -70 || f.sprite.x < 250 || f.sprite.x > 1030) && onGround && this.jumpCooldown <= 0) {
+    // === SPRUNG ===
+    const shouldJump = (dy < -80 && Math.random() < cfg.jumpChance) ||
+                       (f.sprite.x < 240 || f.sprite.x > 1040);
+    if (shouldJump && onGround && this.jumpCooldown <= 0) {
       this.keys.jump = true;
-      this.jumpCooldown = 700 + Math.random()*300;
+      this.jumpCooldown = 600 + Math.random() * 400;
     }
 
-    // Angriff
-    if (dist < 90 && this.attackCooldown <= 0) {
+    // === NAHKAMPF ===
+    if (dist < cfg.attackRange && this.attackCooldown <= 0) {
       this.keys.attack = true;
-      this.attackCooldown = 450 + Math.random()*250;
+      this.attackCooldown = (this.difficulty === 'easy' ? 700 : this.difficulty === 'hard' ? 250 : 450) + Math.random() * 200;
     }
 
-    // Gelegentlich Special
-    if (dist < 200 && Math.random() < 0.002) this.keys.special = true;
+    // === FERNATTACKE ===
+    if (dist > 120 && dist < 500 && Math.random() < cfg.rangedChance && this.rangedCooldown <= 0) {
+      this.keys.ranged = true;
+      this.rangedCooldown = 1500;
+    }
 
+    // === SPECIAL (nur wenn aufgeladen) ===
+    if (f.specialCharge >= f.specialCooldownMax && dist < 300 && Math.random() < cfg.specialChance) {
+      this.keys.special = true;
+    }
+
+    // Reaktionsdelay simulieren
+    this._keyDelay = cfg.reactionMs * (0.5 + Math.random() * 0.5);
     return this.keys;
   }
 }
@@ -318,7 +369,7 @@ class AIController {
 //  Fighter Klasse
 // ============================================================
 class Fighter {
-  constructor(scene, x, y, playerIndex, charData, isAI = false) {
+  constructor(scene, x, y, playerIndex, charData, isAI = false, aiDifficulty = 'medium') {
     this.scene       = scene;
     this.playerIndex = playerIndex;
     this.charData    = charData;
@@ -335,18 +386,18 @@ class Fighter {
     this.stocks    = 4;
     this.damage    = 0;
     this.jumpsLeft = this.stats.jumpCount;
-    this.specialCooldownMax = 30000; // 30 Sekunden zum Aufladen
-    this.specialCharge      = 0;    // Lädt sich auf (0 → 30000)
+    this.specialCooldownMax = 30000;
+    this.specialCharge      = 0;
     this.attackCooldown     = 0;
     this.rangedCooldown     = 0;
 
     this.state = {
       attacking: false, hitstun: 0, fastFalling: false,
       facingRight: playerIndex === 0, frozen: 0,
-      animFrame: 0, animTimer: 0
+      animFrame: 0, animTimer: 0,
+      invincible: 0,  // Respawn-Unverwundbarkeit
     };
 
-    // Physik-Sprite (unsichtbar, nur Hitbox)
     this.sprite = scene.add.rectangle(x, y, 48, 64, 0x000000, 0);
     scene.physics.add.existing(this.sprite);
     this.sprite.body.setMaxVelocity(800, 1800);
@@ -354,10 +405,9 @@ class Fighter {
     this.sprite.body.setCollideWorldBounds(false);
     this.sprite.owner = this;
 
-    // Pixel-Art Grafik-Container (wird jeden Frame neu gezeichnet)
     this.gfx = null;
-
-    this.ai = isAI ? new AIController() : null;
+    this.img = null;
+    this.ai = isAI ? new AIController(aiDifficulty) : null;
   }
 
   update(cursors, delta, target) {
@@ -387,6 +437,9 @@ class Fighter {
       this._redraw();
       return;
     }
+
+    // Invincibility countdown
+    if (this.state.invincible > 0) this.state.invincible -= delta;
 
     if (this.attackCooldown   > 0) this.attackCooldown   -= delta;
     if (this.rangedCooldown   > 0) this.rangedCooldown   -= delta;
@@ -575,8 +628,15 @@ class Fighter {
     const dir = this.state.facingRight ? 1 : -1;
 
     this.scene.cameras.main.shake(180, 0.012);
-    // Großes Auflade-Flash
     SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0xffffff, this.color, 30);
+
+    // Charakter-Kommentar
+    const shouts = { allen:'❄️ BLIZZARD!', bijan:'🦅 FALCON DIVE!', pickens:'🤠 LASSO TIME!', gibbs:'⚡ SPEED DASH!' };
+    const shout = this.scene.add.text(this.sprite.x, this.sprite.y - 80, shouts[id] || '💥 SPECIAL!', {
+      fontSize:'24px', fontFamily:'"Oswald","Arial Black",sans-serif', fontStyle:'bold',
+      color: this.charData.colorHex, stroke:'#000', strokeThickness:4,
+    }).setOrigin(0.5).setDepth(50);
+    this.scene.tweens.add({ targets:shout, y:shout.y-70, alpha:0, duration:1400, ease:'Power2', onComplete:()=>shout.destroy() });
 
     if (id === 'allen') {
       SpriteRenderer.spawnFX(this.scene, this.sprite.x, this.sprite.y, 0x88ccff, 0xffffff, 24);
@@ -640,10 +700,13 @@ class Fighter {
 
   receiveHit(baseDamage, dirX, dirY = 0) {
     if (this.state.frozen > 0) { this.state.frozen = 0; return; }
+    if (this.state.invincible > 0) return; // Respawn-Schutz
     this.damage += baseDamage;
-    const kb = ((this.damage * 0.1 + 0.1) * (baseDamage + 5) * (200 / (this.stats.weight + 100)) * 1.4 + 4) * 18;
-    this.sprite.body.setVelocity(dirX * kb, dirY !== 0 ? dirY * kb * 0.8 : -kb * 0.6);
-    this.state.hitstun = Math.min(kb * 1.2, 600);
+    // Knockback-Formel mit Cap damit man nicht sofort aus dem Bild fliegt
+    const rawKb = ((this.damage * 0.1 + 0.1) * (baseDamage + 5) * (200 / (this.stats.weight + 100)) * 1.4 + 4) * 18;
+    const kb = Math.min(rawKb, 1400); // Cap bei 1400
+    this.sprite.body.setVelocity(dirX * kb, dirY !== 0 ? dirY * kb * 0.8 : -kb * 0.55);
+    this.state.hitstun = Math.min(kb * 1.1, 550);
     this.scene.cameras.main.shake(80, 0.006);
   }
 
@@ -654,14 +717,31 @@ class Fighter {
     if (this.stocks <= 0) {
       this.scene.events.emit('playerOut', this.playerIndex);
       this.sprite.setVisible(false);
-      if (this.img) { this.img.setVisible(false); }
+      if (this.img) this.img.setVisible(false);
       if (this.gfx) { this.gfx.destroy(); this.gfx = null; }
       return;
     }
     const spawnX = this.playerIndex === 0 ? 320 : 960;
-    this.sprite.setPosition(spawnX, 200);
+    this.sprite.setPosition(spawnX, 150);
     this.sprite.body.setVelocity(0, 0);
-    this.state.hitstun = 0; this.state.frozen = 0;
+    this.state.hitstun = 0;
+    this.state.frozen  = 0;
+    this.state.invincible = 2000; // 2 Sekunden unverwundbar
+
+    // Blink-Animation während Unverwundbarkeit
+    let blinkCount = 0;
+    const blink = () => {
+      if (blinkCount >= 16 || this.state.invincible <= 0) {
+        if (this.img) this.img.setAlpha(1);
+        this.state.invincible = 0;
+        return;
+      }
+      const visible = blinkCount % 2 === 0;
+      if (this.img) this.img.setAlpha(visible ? 1 : 0.15);
+      blinkCount++;
+      this.scene.time.delayedCall(125, blink);
+    };
+    blink();
   }
 
   isOutOfBounds(W, H) {
@@ -684,8 +764,11 @@ class CharSelectScene extends Phaser.Scene {
   create() {
     const W = this.scale.width, H = this.scale.height;
     this.p1Selected = 0;
+    this.p2Selected = 1;
     this.selectionConfirmed = false;
     this.aiCharIndex = Phaser.Math.Between(0, CHARACTERS.length-1);
+    this.gameMode   = 'cpu';    // 'cpu' | '2p'
+    this.difficulty = 'medium'; // 'easy' | 'medium' | 'hard'
 
     // BG
     const bg = this.add.graphics();
@@ -697,148 +780,240 @@ class CharSelectScene extends Phaser.Scene {
     const headerBg = this.add.graphics();
     headerBg.fillStyle(0xcc0000, 1);
     headerBg.fillRect(0, 0, W, 58);
-    headerBg.fillStyle(0x000000, 0.3);
-    headerBg.fillRect(0, 54, W, 4);
-
     this.add.text(W/2, 29, 'CHARAKTER WÄHLEN', {
-      fontSize: '30px',
-      fontFamily: '"Oswald", "Arial Black", sans-serif',
-      fontStyle: 'bold',
-      color: '#ffffff',
-      letterSpacing: 6,
+      fontSize:'30px', fontFamily:'"Oswald","Arial Black",sans-serif', fontStyle:'bold',
+      color:'#ffffff', letterSpacing:6,
     }).setOrigin(0.5);
 
-    // CPU Badge
-    const cpuBg = this.add.graphics();
-    cpuBg.fillStyle(0x111111, 0.9);
-    cpuBg.fillRoundedRect(W-200, 8, 192, 42, 6);
-    cpuBg.lineStyle(1, 0xcc0000, 1);
-    cpuBg.strokeRoundedRect(W-200, 8, 192, 42, 6);
-    this.add.text(W-104, 29,
-      `🤖 CPU: ${CHARACTERS[this.aiCharIndex].emoji} ${CHARACTERS[this.aiCharIndex].name}`,
-      { fontSize:'12px', fontFamily:'"Barlow Condensed", Arial, sans-serif', color:'#dddddd' }
-    ).setOrigin(0.5);
+    // === MODUS-AUSWAHL ===
+    const modeY = H - 130;
+    const modeBg = this.add.graphics();
+    modeBg.fillStyle(0x000000, 0.7);
+    modeBg.fillRect(0, modeY - 10, W, 140);
+    modeBg.lineStyle(1, 0xcc0000, 0.6);
+    modeBg.lineBetween(0, modeY - 10, W, modeY - 10);
 
-    // Charakter-Karten
+    // Modus-Buttons
+    this.modeGfx = this.add.graphics();
+    const drawModeButtons = () => {
+      this.modeGfx.clear();
+      const modes = [['cpu','🤖 VS CPU'],['2p','👥 2 SPIELER']];
+      modes.forEach(([m, label], i) => {
+        const bx = W/2 - 160 + i * 170, by = modeY + 6;
+        const sel = this.gameMode === m;
+        this.modeGfx.fillStyle(sel ? 0xcc0000 : 0x1a1a2e, 1);
+        this.modeGfx.fillRoundedRect(bx-70, by, 140, 36, 6);
+        this.modeGfx.lineStyle(2, sel ? 0xff4444 : 0x334466, 1);
+        this.modeGfx.strokeRoundedRect(bx-70, by, 140, 36, 6);
+      });
+    };
+    drawModeButtons();
+
+    const modeLabels = [];
+    [['cpu','🤖 VS CPU'],['2p','👥 2 SPIELER']].forEach(([m, label], i) => {
+      const bx = W/2 - 160 + i * 170, by = modeY + 24;
+      const t = this.add.text(bx, by, label, {
+        fontSize:'14px', fontFamily:'"Oswald",Arial,sans-serif', fontStyle:'bold',
+        color:'#ffffff',
+      }).setOrigin(0.5);
+      modeLabels.push(t);
+      const z = this.add.zone(bx, by, 140, 36).setInteractive();
+      z.on('pointerdown', () => {
+        this.gameMode = m;
+        drawModeButtons();
+        updateLabels();
+        this.input.setDefaultCursor('default');
+      });
+      z.on('pointerover', () => this.input.setDefaultCursor('pointer'));
+      z.on('pointerout',  () => this.input.setDefaultCursor('default'));
+    });
+
+    // Schwierigkeits-Buttons (nur im CPU-Modus sichtbar)
+    this.diffGfx = this.add.graphics();
+    this.diffLabels = [];
+    const drawDiffButtons = () => {
+      this.diffGfx.clear();
+      const diffs = [['easy','😊 LEICHT'],['medium','😤 MITTEL'],['hard','💀 SCHWER']];
+      diffs.forEach(([d, label], i) => {
+        const bx = W/2 - 160 + i * 110, by = modeY + 52;
+        const sel = this.difficulty === d;
+        const col = d==='easy'?0x228822:d==='medium'?0xcc8800:0xcc2222;
+        this.diffGfx.fillStyle(sel ? col : 0x111122, 1);
+        this.diffGfx.fillRoundedRect(bx-48, by, 96, 28, 5);
+        this.diffGfx.lineStyle(1, sel ? col : 0x223344, 1);
+        this.diffGfx.strokeRoundedRect(bx-48, by, 96, 28, 5);
+      });
+    };
+    drawDiffButtons();
+
+    [['easy','😊 LEICHT'],['medium','😤 MITTEL'],['hard','💀 SCHWER']].forEach(([d, label], i) => {
+      const bx = W/2 - 160 + i * 110, by = modeY + 66;
+      const t = this.add.text(bx, by, label, {
+        fontSize:'11px', fontFamily:'"Barlow Condensed",Arial,sans-serif', color:'#cccccc'
+      }).setOrigin(0.5);
+      this.diffLabels.push(t);
+      const z = this.add.zone(bx, by, 96, 28).setInteractive();
+      z.on('pointerdown', () => { this.difficulty=d; drawDiffButtons(); this.input.setDefaultCursor('default'); });
+      z.on('pointerover', () => this.input.setDefaultCursor('pointer'));
+      z.on('pointerout',  () => this.input.setDefaultCursor('default'));
+    });
+
+    // P2 Label (wechselt je nach Modus)
+    this.p2ModeText = this.add.text(W - 20, modeY + 24, '', {
+      fontSize:'12px', fontFamily:'"Barlow Condensed",Arial,sans-serif', color:'#aaaaaa'
+    }).setOrigin(1, 0.5);
+
+    const updateLabels = () => {
+      if (this.gameMode === 'cpu') {
+        this.p2ModeText.setText(`🤖 CPU: ${CHARACTERS[this.aiCharIndex].emoji} ${CHARACTERS[this.aiCharIndex].name}`);
+        this.diffLabels.forEach(t => t.setAlpha(1));
+        this.diffGfx.setAlpha(1);
+      } else {
+        this.p2ModeText.setText(`P2 wählt mit ← → + ENTER`);
+        this.diffLabels.forEach(t => t.setAlpha(0.2));
+        this.diffGfx.setAlpha(0.2);
+      }
+    };
+    updateLabels();
+
+    // === CHARAKTER-KARTEN ===
     this.cards = [];
-    const cardW = 270, cardH = 340;
+    const cardW = 270, cardH = 310;
     const totalW = CHARACTERS.length * (cardW + 16) - 16;
     const startX = (W - totalW) / 2 + cardW / 2;
 
     CHARACTERS.forEach((char, i) => {
       const cx = startX + i * (cardW + 16);
-      const cy = H / 2 + 38;
+      const cy = H / 2 + 10;
 
       const card = this.add.graphics();
-      const drawCard = (sel) => {
+      const drawCard = () => {
+        const p1sel = this.p1Selected === i;
+        const p2sel = this.gameMode === '2p' && this.p2Selected === i;
         card.clear();
-        // Schatten
-        card.fillStyle(0x000000, 0.5);
+        card.fillStyle(0x000000, 0.4);
         card.fillRoundedRect(cx-cardW/2+3, cy-cardH/2+3, cardW, cardH, 10);
-        // Karte
-        card.fillStyle(sel ? 0x0a1f3d : 0x080f1e, 1);
+        card.fillStyle(p1sel||p2sel ? 0x0a1f3d : 0x080f1e, 1);
         card.fillRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 10);
-        // Farbstreifen oben
-        card.fillStyle(parseInt(char.colorHex.replace('#',''), 16), sel ? 1.0 : 0.7);
+        card.fillStyle(parseInt(char.colorHex.replace('#',''), 16), (p1sel||p2sel) ? 1 : 0.6);
         card.fillRoundedRect(cx-cardW/2, cy-cardH/2, cardW, 6, 2);
-        // Rand
-        card.lineStyle(sel ? 3 : 1, sel ? parseInt(char.colorHex.replace('#',''), 16) : 0x222244, 1);
-        card.strokeRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 10);
-        // Glow bei Auswahl
-        if (sel) {
-          card.lineStyle(8, parseInt(char.colorHex.replace('#',''), 16), 0.15);
+        // P1 border = blau, P2 border = rot
+        if (p1sel) {
+          card.lineStyle(3, 0x00aaff, 1);
+          card.strokeRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 10);
+          card.lineStyle(8, 0x00aaff, 0.15);
           card.strokeRoundedRect(cx-cardW/2-4, cy-cardH/2-4, cardW+8, cardH+8, 12);
         }
+        if (p2sel) {
+          card.lineStyle(3, 0xff4444, 1);
+          card.strokeRoundedRect(cx-cardW/2+2, cy-cardH/2+2, cardW-4, cardH-4, 9);
+        }
+        if (!p1sel && !p2sel) {
+          card.lineStyle(1, 0x222244, 1);
+          card.strokeRoundedRect(cx-cardW/2, cy-cardH/2, cardW, cardH, 10);
+        }
       };
-      drawCard(i === 0);
+      drawCard();
 
       // Nummer-Badge
       const numBg = this.add.graphics();
       numBg.fillStyle(parseInt(char.colorHex.replace('#',''), 16), 1);
-      numBg.fillCircle(cx+cardW/2-22, cy-cardH/2+22, 20);
+      numBg.fillCircle(cx+cardW/2-22, cy-cardH/2+22, 18);
       this.add.text(cx+cardW/2-22, cy-cardH/2+22, `#${char.number}`, {
-        fontSize:'13px', fontFamily:'"Oswald", Arial, sans-serif', fontStyle:'bold', color:'#fff'
+        fontSize:'12px', fontFamily:'"Oswald",Arial,sans-serif', fontStyle:'bold', color:'#fff'
       }).setOrigin(0.5);
 
-      // Emoji
-      this.add.text(cx, cy-95, char.emoji, { fontSize:'52px' }).setOrigin(0.5);
-
-      // Name
-      this.add.text(cx, cy-30, char.name.toUpperCase(), {
-        fontSize: '18px',
-        fontFamily: '"Oswald", "Arial Black", sans-serif',
-        fontStyle: 'bold',
-        color: '#ffffff',
-        letterSpacing: 1,
+      this.add.text(cx, cy-82, char.emoji, { fontSize:'48px' }).setOrigin(0.5);
+      this.add.text(cx, cy-28, char.name.toUpperCase(), {
+        fontSize:'17px', fontFamily:'"Oswald","Arial Black",sans-serif', fontStyle:'bold', color:'#ffffff', letterSpacing:1,
+      }).setOrigin(0.5);
+      this.add.text(cx, cy-4, char.description, {
+        fontSize:'11px', fontFamily:'"Barlow Condensed",Arial,sans-serif', color:'#888899'
       }).setOrigin(0.5);
 
-      this.add.text(cx, cy+0, char.description, {
-        fontSize:'11px', fontFamily:'"Barlow Condensed", Arial, sans-serif', color:'#888899'
-      }).setOrigin(0.5);
-
-      // Special
       const spBg = this.add.graphics();
-      spBg.fillStyle(parseInt(char.colorHex.replace('#',''), 16), 0.15);
-      spBg.fillRoundedRect(cx-cardW/2+10, cy+16, cardW-20, 38, 6);
-      spBg.lineStyle(1, parseInt(char.colorHex.replace('#',''), 16), 0.4);
-      spBg.strokeRoundedRect(cx-cardW/2+10, cy+16, cardW-20, 38, 6);
-      this.add.text(cx, cy+28, `✨ ${char.special}`, {
-        fontSize:'13px', fontFamily:'"Oswald", Arial, sans-serif', fontStyle:'bold',
-        color:char.colorHex
+      spBg.fillStyle(parseInt(char.colorHex.replace('#',''), 16), 0.12);
+      spBg.fillRoundedRect(cx-cardW/2+10, cy+14, cardW-20, 34, 6);
+      spBg.lineStyle(1, parseInt(char.colorHex.replace('#',''), 16), 0.35);
+      spBg.strokeRoundedRect(cx-cardW/2+10, cy+14, cardW-20, 34, 6);
+      this.add.text(cx, cy+24, `✨ ${char.special}`, {
+        fontSize:'12px', fontFamily:'"Oswald",Arial,sans-serif', fontStyle:'bold', color:char.colorHex
       }).setOrigin(0.5);
-      this.add.text(cx, cy+46, char.specialDesc, {
-        fontSize:'10px', fontFamily:'"Barlow Condensed", Arial, sans-serif', color:'#aaaaaa',
-        wordWrap:{width:cardW-24}, align:'center'
+      this.add.text(cx, cy+40, char.specialDesc, {
+        fontSize:'10px', fontFamily:'"Barlow Condensed",Arial,sans-serif', color:'#aaaaaa', wordWrap:{width:cardW-24}, align:'center'
       }).setOrigin(0.5);
 
-      // Stats
-      const statY = cy + 76;
-      [['SPD', (char.stats.runSpeed-300)/200], ['WGT', (char.stats.weight-80)/40]].forEach(([label, val], si) => {
-        const sy = statY + si * 22;
-        this.add.text(cx-cardW/2+12, sy, label, {
-          fontSize:'10px', fontFamily:'"Oswald", Arial, sans-serif', color:'#666677'
-        });
-        const barW = cardW - 60;
+      const statY = cy + 66;
+      [['SPD',(char.stats.runSpeed-300)/200],['WGT',(char.stats.weight-80)/40]].forEach(([label,val],si) => {
+        const sy = statY + si*20;
+        this.add.text(cx-cardW/2+12, sy, label, { fontSize:'10px', fontFamily:'"Oswald",Arial,sans-serif', color:'#555566' });
         const sg = this.add.graphics();
-        sg.fillStyle(0x111122, 1);
-        sg.fillRoundedRect(cx-cardW/2+44, sy, barW, 10, 5);
-        sg.fillStyle(si===0 ? 0x00cc66 : 0xff8800, 1);
-        sg.fillRoundedRect(cx-cardW/2+44, sy, Math.floor(barW*Math.min(val,1)), 10, 5);
+        sg.fillStyle(0x111122,1); sg.fillRoundedRect(cx-cardW/2+44, sy, cardW-60, 9, 4);
+        sg.fillStyle(si===0?0x00cc66:0xff8800,1); sg.fillRoundedRect(cx-cardW/2+44, sy, Math.floor((cardW-60)*Math.min(val,1)), 9, 4);
       });
 
-      // Klick
       const zone = this.add.zone(cx, cy, cardW, cardH).setInteractive();
-      zone.on('pointerover',  () => { drawCard(true);  this.input.setDefaultCursor('pointer'); });
-      zone.on('pointerout',   () => { drawCard(i===this.p1Selected); this.input.setDefaultCursor('default'); });
-      zone.on('pointerdown',  () => { this.p1Selected=i; this.cards.forEach(c=>c.draw(c.i===i)); });
+      zone.on('pointerover',  () => { this.input.setDefaultCursor('pointer'); });
+      zone.on('pointerout',   () => this.input.setDefaultCursor('default'));
+      zone.on('pointerdown',  () => {
+        this.p1Selected = i;
+        this.cards.forEach(c => c.draw());
+      });
 
       this.cards.push({ draw: drawCard, i });
     });
 
-    // Footer
-    const footBg = this.add.graphics();
-    footBg.fillStyle(0x000000, 0.7);
-    footBg.fillRect(0, H-52, W, 52);
-    footBg.lineStyle(1, 0xcc0000, 0.6);
-    footBg.lineBetween(0, H-52, W, H-52);
-
-    this.add.text(W/2, H-26,
-      '← → AUSWÄHLEN   •   KLICKEN ZUM WÄHLEN   •   LEERTASTE / ENTER = STARTEN',
-      { fontSize:'12px', fontFamily:'"Barlow Condensed", Arial, sans-serif',
-        color:'#888888', letterSpacing:2 }
-    ).setOrigin(0.5);
+    // P1/P2 Labels über Karten
+    this.add.text(20, 68, 'P1  →', {
+      fontSize:'14px', fontFamily:'"Oswald",Arial,sans-serif', color:'#00aaff', fontStyle:'bold'
+    });
+    this.p2Label = this.add.text(20, 88, 'P2  →', {
+      fontSize:'14px', fontFamily:'"Oswald",Arial,sans-serif', color:'#ff4444', fontStyle:'bold'
+    });
 
     // Keyboard
-    this.input.keyboard.on('keydown-LEFT',  () => { this.p1Selected=Math.max(0,this.p1Selected-1); this.cards.forEach(c=>c.draw(c.i===this.p1Selected)); });
-    this.input.keyboard.on('keydown-RIGHT', () => { this.p1Selected=Math.min(CHARACTERS.length-1,this.p1Selected+1); this.cards.forEach(c=>c.draw(c.i===this.p1Selected)); });
+    this.input.keyboard.on('keydown-LEFT',  () => {
+      this.p1Selected = Math.max(0, this.p1Selected-1);
+      this.cards.forEach(c=>c.draw());
+    });
+    this.input.keyboard.on('keydown-RIGHT', () => {
+      this.p1Selected = Math.min(CHARACTERS.length-1, this.p1Selected+1);
+      this.cards.forEach(c=>c.draw());
+    });
+    // P2 in 2P-Modus: A/D
+    this.input.keyboard.on('keydown-A', () => {
+      if (this.gameMode !== '2p') return;
+      this.p2Selected = Math.max(0, this.p2Selected-1);
+      this.cards.forEach(c=>c.draw());
+    });
+    this.input.keyboard.on('keydown-D', () => {
+      if (this.gameMode !== '2p') return;
+      this.p2Selected = Math.min(CHARACTERS.length-1, this.p2Selected+1);
+      this.cards.forEach(c=>c.draw());
+    });
     this.input.keyboard.once('keydown-SPACE', () => this._start());
     this.input.keyboard.once('keydown-ENTER', () => this._start());
+
+    // Footer
+    const footBg = this.add.graphics();
+    footBg.fillStyle(0x000000, 0.7); footBg.fillRect(0, H-38, W, 38);
+    footBg.lineStyle(1, 0xcc0000, 0.5); footBg.lineBetween(0, H-38, W, H-38);
+    this.add.text(W/2, H-18,
+      'P1: ← → WÄHLEN   |   2P-Modus: A D WÄHLEN   |   LEERTASTE / ENTER = STARTEN',
+      { fontSize:'11px', fontFamily:'"Barlow Condensed",Arial,sans-serif', color:'#666677', letterSpacing:1 }
+    ).setOrigin(0.5);
   }
 
   _start() {
     if (this.selectionConfirmed) return;
     this.selectionConfirmed = true;
-    this.scene.start('GameScene', { p1CharIndex: this.p1Selected, aiCharIndex: this.aiCharIndex });
+    this.scene.start('GameScene', {
+      p1CharIndex: this.p1Selected,
+      p2CharIndex: this.p2Selected,
+      aiCharIndex: this.aiCharIndex,
+      gameMode:    this.gameMode,
+      difficulty:  this.difficulty,
+    });
   }
 }
 
@@ -946,7 +1121,13 @@ class HUDScene extends Phaser.Scene {
 // ============================================================
 class GameScene extends Phaser.Scene {
   constructor() { super({ key: 'GameScene' }); }
-  init(d) { this.p1Idx = d.p1CharIndex??0; this.aiIdx = d.aiCharIndex??1; }
+  init(d) {
+    this.p1Idx      = d.p1CharIndex ?? 0;
+    this.p2Idx      = d.p2CharIndex ?? 1;
+    this.aiIdx      = d.aiCharIndex ?? 1;
+    this.gameMode   = d.gameMode   ?? 'cpu';    // 'cpu' | '2p'
+    this.difficulty = d.difficulty ?? 'medium'; // 'easy'|'medium'|'hard'
+  }
 
   create() {
     const W = this.scale.width, H = this.scale.height;
@@ -1122,7 +1303,9 @@ class GameScene extends Phaser.Scene {
 
     // Fighter
     const p1 = new Fighter(this, 320, 400, 0, CHARACTERS[this.p1Idx], false);
-    const p2 = new Fighter(this, 960, 400, 1, CHARACTERS[this.aiIdx], true);
+    const isCPU = this.gameMode === 'cpu';
+    const p2CharIdx = isCPU ? this.aiIdx : this.p2Idx;
+    const p2 = new Fighter(this, 960, 400, 1, CHARACTERS[p2CharIdx], isCPU, this.difficulty);
     this.fighters = [p1, p2];
 
     // Kollisionen
@@ -1139,7 +1322,7 @@ class GameScene extends Phaser.Scene {
       });
     });
 
-    // Controls
+    // Controls P1
     const kb = this.input.keyboard;
     this.p1Controls = {
       left:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.A),
@@ -1151,8 +1334,19 @@ class GameScene extends Phaser.Scene {
       ranged:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.K),
       special: kb.addKey(Phaser.Input.Keyboard.KeyCodes.L),
     };
+    // Controls P2 (Pfeiltasten + Numpad)
+    this.p2Controls = {
+      left:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
+      right:   kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
+      up:      kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+      down:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
+      jump:    kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+      attack:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.NUMPAD_ONE),
+      ranged:  kb.addKey(Phaser.Input.Keyboard.KeyCodes.NUMPAD_TWO),
+      special: kb.addKey(Phaser.Input.Keyboard.KeyCodes.NUMPAD_THREE),
+    };
 
-    this.scene.launch('HUDScene', { fighters: this.fighters });
+    this.scene.launch('HUDScene', { fighters: this.fighters, gameMode: this.gameMode });
     this.events.on('playerOut', () => this._checkGameOver());
   }
 
@@ -1161,7 +1355,10 @@ class GameScene extends Phaser.Scene {
     const W=this.scale.width, H=this.scale.height;
     const p1=this.fighters[0], p2=this.fighters[1];
     if (p1?.stocks > 0) p1.update(this.p1Controls, delta, p2);
-    if (p2?.stocks > 0) p2.update(null, delta, p1);
+    if (p2?.stocks > 0) {
+      if (this.gameMode === '2p') p2.update(this.p2Controls, delta, p1);
+      else p2.update(null, delta, p1);
+    }
     this.fighters.forEach(f => { if (f.stocks>0 && f.isOutOfBounds(W,H)) f.loseStock(); });
   }
 
